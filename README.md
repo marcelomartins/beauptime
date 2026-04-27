@@ -56,13 +56,17 @@ BeaUptime is for teams and solo maintainers who want a simple self-hosted monito
 
 ## Stack
 
+Built on top of the [BHVC: Bun Hono Vue Cloudflare Starter Kit](https://github.com/marcelomartins/bun-hono-vue-cloudflare), which provides the Bun + Hono + Vue + Cloudflare stack and deployment model used to run BeaUptime on Cloudflare infrastructure.
+
 Cloudflare-native stack:
 
 - **Cloudflare Workers** — API, frontend assets, and scheduled execution
 - **Cloudflare D1** — managed SQLite storage
 - **Cloudflare Cron Triggers** — monitoring and cleanup jobs
 - **Cloudflare Email Routing** — optional alert delivery
-- Hono · Vue 3 · Vite + Vite SSG · TypeScript · Bun
+- **BHVC stack** — Bun · Hono · Vue 3 · Vite + Vite SSG · TypeScript
+
+See the starter repository for more details about the underlying stack and Cloudflare-first architecture: <https://github.com/marcelomartins/bun-hono-vue-cloudflare>
 
 ---
 
