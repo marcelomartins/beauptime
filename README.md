@@ -1,8 +1,8 @@
-# BeaUptime — Free Uptime Monitoring on Cloudflare's Free Plan
+# BeaUptime - Open-Source Uptime Monitoring on Cloudflare's Free Plan
 
-**Full uptime monitoring at zero cost.** BeaUptime runs entirely inside Cloudflare's free-tier infrastructure — no servers to manage, no monthly bills, no vendor lock-in beyond what you already have for free.
+BeaUptime is an open-source uptime monitoring system designed to run entirely on Cloudflare's free plan. It gives you scheduled checks, incident tracking, a public status page, and a private admin dashboard without paying for servers or a separate monitoring service.
 
-Open-source and self-hosted, BeaUptime combines a public status page, a private admin dashboard, scheduled checks, incident tracking, and optional email alerts — all deployed as a single Cloudflare Worker on the free plan.
+It is self-hosted, deployed as a single Cloudflare Worker, and uses Cloudflare Workers, D1, Cron Triggers, and optional Email Routing.
 
 <p align="center">
   <img src="./screenshot.png" alt="BeaUptime screenshot" width="1200" />
@@ -10,9 +10,9 @@ Open-source and self-hosted, BeaUptime combines a public status page, a private 
 
 ---
 
-## 🆓 Zero Cost. No Servers. No Bills.
+## Cloudflare Free Plan
 
-BeaUptime is designed from the ground up to fit entirely within [Cloudflare's free plan](https://www.cloudflare.com/plans/):
+For small deployments, the default BeaUptime architecture fits within [Cloudflare's included limits](https://www.cloudflare.com/plans/):
 
 | Cloudflare Product | Free Plan Limit | How BeaUptime Uses It |
 | --- | --- | --- |
@@ -21,24 +21,21 @@ BeaUptime is designed from the ground up to fit entirely within [Cloudflare's fr
 | **D1 (SQLite)** | 5 GB storage, 5M reads/day | All check history and incident data |
 | **Email Routing** | Included on free zones | Optional downtime alert emails |
 
-> No credit card required. No surprise charges. No infrastructure to manage.
+> No credit card required. The whole stack can run within Cloudflare's included limits, so you avoid extra infrastructure costs and servers to manage.
 > Just a Cloudflare account and a few `wrangler` commands.
 
 ---
 
 ## Why BeaUptime
 
-Most uptime monitoring tools either cost money or require you to run your own server. BeaUptime eliminates both problems by running entirely on Cloudflare's edge — globally distributed, highly available, and **free for small deployments**.
+BeaUptime is for teams and solo maintainers who want a simple self-hosted monitor without running their own server stack.
 
-- ✅ **$0/month** — fits entirely within Cloudflare's free plan
-- ✅ **No server** — runs as a Cloudflare Worker, not a VPS or container
-- ✅ **No database to manage** — uses Cloudflare D1 (managed SQLite)
-- ✅ **Globally distributed** — Cloudflare's edge network handles availability
-- ✅ **One deployment** — app, API, and cron jobs in a single Worker
-- ✅ **Public status page** without exposing the admin console
+- ✅ **Single deployment** — app, API, and cron jobs in one Worker
+- ✅ **Public status page** plus a protected admin dashboard
 - ✅ Monitor both **HTTP endpoints** and **TCP ports**
-- ✅ Automatic incident lifecycle — open on failure, resolve on recovery
-- ✅ Optional **email alerts** via Cloudflare Email Routing (also free)
+- ✅ **Automatic incident lifecycle** — open on failure, resolve on recovery
+- ✅ **Managed storage** with Cloudflare D1
+- ✅ **Optional email alerts** via Cloudflare Email Routing
 
 ---
 
@@ -59,12 +56,12 @@ Most uptime monitoring tools either cost money or require you to run your own se
 
 ## Stack
 
-Everything runs on Cloudflare's free tier:
+Cloudflare-native stack:
 
-- **Cloudflare Workers** — serverless compute (free plan)
-- **Cloudflare D1** — managed SQLite database (free plan)
-- **Cloudflare Cron Triggers** — scheduled monitoring (free plan)
-- **Cloudflare Email Routing** — alert emails (free, optional)
+- **Cloudflare Workers** — API, frontend assets, and scheduled execution
+- **Cloudflare D1** — managed SQLite storage
+- **Cloudflare Cron Triggers** — monitoring and cleanup jobs
+- **Cloudflare Email Routing** — optional alert delivery
 - Hono · Vue 3 · Vite + Vite SSG · TypeScript · Bun
 
 ---
@@ -93,8 +90,7 @@ Current scheduled jobs:
 ## Requirements
 
 - [Bun](https://bun.sh/)
-- A Cloudflare account (free plan is enough)
-- A Cloudflare D1 database (created via `wrangler`, free)
+- A Cloudflare account
 
 ---
 

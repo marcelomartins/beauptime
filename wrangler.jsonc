@@ -11,6 +11,14 @@
 		"DEFAULT_TIMEOUT_MS": "8000",
 		"INCIDENT_RETENTION_DAYS": "730"
 	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			// Replace with the D1 database id from your own Cloudflare account before remote deploys.
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "./worker-api/migrations"
+		}
+	],
 	"assets": {
 		"directory": "./dist/web-vue",
 		"binding": "ASSETS",
@@ -26,15 +34,6 @@
 			"17 3 * * *"
 		]
 	},
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "bea-uptime",
-			// Replace with the D1 database id from your own Cloudflare account before remote deploys.
-			"database_id": "00000000-0000-0000-0000-000000000000",
-			"migrations_dir": "./worker-api/migrations"
-		}
-	],
 	"send_email": [
 		{
 			"name": "SEND_EMAIL"

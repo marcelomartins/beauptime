@@ -66,12 +66,15 @@ const saving = ref(false)
 const testing = ref(false)
 const deleting = ref(false)
 const refreshingLiveData = ref(false)
+const lastDashboardRefreshAt = ref<string | null>(null)
 const errorMessage = ref('')
 const statusMessage = ref('')
 const liveRefreshIntervalMs = 30_000
 let liveRefreshTimer: ReturnType<typeof setInterval> | undefined
 
 const theme = ref<'light' | 'dark'>('light')
+
+const currentLocale = () => String(i18n.global.locale.value)
 
 const toggleTheme = () => {
   const next = theme.value === 'dark' ? 'light' : 'dark'
@@ -227,6 +230,27 @@ const formatDate = (value?: string | null) => {
 
   return new Date(value).toLocaleString()
 }
+
+const formatRefreshTimestamp = (value?: string | null) => {
+  if (!value) {
+    return t('dashboard.console.never')
+  }
+
+  return new Intl.DateTimeFormat(currentLocale(), {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
+
+const markDashboardRefreshed = () => {
+  lastDashboardRefreshAt.value = new Date().toISOString()
+}
+
+const lastRefreshLabel = computed(() => {
+  return t('dashboard.console.lastUpdatedAt', {
+    time: formatRefreshTimestamp(lastDashboardRefreshAt.value),
+  })
+})
 
 const formatRelativeTime = (value?: string | null) => {
   if (!value) {
@@ -651,6 +675,7 @@ const bootstrap = async () => {
   try {
     await servicesStore.fetchServices()
     await loadTimeline24h()
+    markDashboardRefreshed()
     errorMessage.value = ''
   } catch (error) {
     errorMessage.value = messageFrom(error, t('dashboard.console.errors.bootstrapFailed'))
@@ -675,6 +700,7 @@ const refreshLiveData = async () => {
         : Promise.resolve(),
       panelMode.value === 'incidents' ? fetchIncidentList() : Promise.resolve(),
     ])
+    markDashboardRefreshed()
   } catch (error) {
     errorMessage.value = messageFrom(error, t('dashboard.console.errors.liveRefreshFailed'))
   } finally {
@@ -955,6 +981,10 @@ onUnmounted(() => {
           <AppMark class="brand-logo" />
           <span>{{ $t('app.name') }}</span>
         </button>
+
+        <div class="dashboard-header__refresh" :title="lastRefreshLabel">
+          <strong>{{ formatRefreshTimestamp(lastDashboardRefreshAt) }}</strong>
+        </div>
 
         <div class="dashboard-header__actions">
           <button class="header-action" :class="{ 'is-active': panelMode === 'create' }" type="button" @click="openCreate">
@@ -1440,22 +1470,22 @@ onUnmounted(() => {
   min-width: 100%;
   max-width: 1320px;
   margin: 0 auto;
-  padding: 16px 24px;
+  padding: 8px 24px;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 20px;
+  gap: 14px;
 }
 
 .brand-button {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-size: clamp(1.3rem, 2.3vw, 1.8rem);
   font-weight: 800;
   letter-spacing: -0.04em;
   cursor: pointer;
@@ -1463,8 +1493,8 @@ onUnmounted(() => {
 }
 
 .brand-logo {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
 }
 
@@ -1472,8 +1502,34 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: nowrap;
+}
+
+.dashboard-header__refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  min-height: 0;
+  text-align: center;
+  align-self: center;
+}
+
+.dashboard-header__refresh::before,
+.dashboard-header__refresh::after {
+  content: '';
+  width: 18px;
+  height: 1px;
+  background: color-mix(in srgb, var(--text-faint) 55%, transparent);
+}
+
+.dashboard-header__refresh strong {
+  font-size: 1.08rem;
+  line-height: 1;
+  color: var(--text);
+  white-space: nowrap;
 }
 
 .header-action,
@@ -1481,8 +1537,8 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 44px;
+  gap: 8px;
+  min-height: 38px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -1498,8 +1554,9 @@ onUnmounted(() => {
 }
 
 .header-action {
-  padding: 0 16px;
+  padding: 0 12px;
   font-weight: 700;
+  font-size: 0.9rem;
   box-shadow: var(--shadow);
   white-space: nowrap;
   min-width: 0;
@@ -1516,7 +1573,7 @@ onUnmounted(() => {
 }
 
 .icon-btn {
-  width: 44px;
+  width: 38px;
   padding: 0;
   flex: 0 0 auto;
 }
@@ -1534,7 +1591,7 @@ onUnmounted(() => {
   width: 100%;
   max-width: 1320px;
   margin: 0 auto;
-  padding: 20px 24px 40px;
+  padding: 12px 24px 32px;
 }
 
 .dashboard-body--detail {
@@ -1550,7 +1607,7 @@ onUnmounted(() => {
 
 .dashboard-content {
   display: grid;
-  gap: 20px;
+  gap: 18px;
 }
 
 .shell-card {
@@ -1596,13 +1653,14 @@ onUnmounted(() => {
 .service-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  column-gap: 12px;
+  row-gap: 10px;
 }
 
 .overview-service-card {
-  padding: 18px 20px;
+  padding: 14px 16px;
   display: grid;
-  gap: 16px;
+  gap: 12px;
   cursor: pointer;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
@@ -1639,20 +1697,20 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
 }
 
 .overview-service-card__titles,
 .service-focus__titles {
   min-width: 0;
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .overview-service-card__titles h2 {
   margin: 0;
-  font-size: 1.55rem;
-  line-height: 1.05;
+  font-size: 1.38rem;
+  line-height: 1.02;
   letter-spacing: -0.04em;
 }
 
@@ -1661,7 +1719,8 @@ onUnmounted(() => {
   text-decoration: underline;
   text-underline-offset: 3px;
   overflow-wrap: anywhere;
-  font-size: 0.92rem;
+  font-size: 0.84rem;
+  line-height: 1.2;
 }
 
 .service-target-link:hover {
@@ -1672,12 +1731,12 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 10px;
   border-radius: 999px;
   border: 1px solid transparent;
   font-weight: 800;
-  font-size: 0.8rem;
+  font-size: 0.74rem;
   white-space: nowrap;
 }
 
@@ -1723,7 +1782,8 @@ onUnmounted(() => {
 }
 
 .signal-bars--overview {
-  min-height: 56px;
+  min-height: 44px;
+  gap: 4px;
 }
 
 .signal-bars--focus {
@@ -1753,8 +1813,8 @@ onUnmounted(() => {
 .service-metrics-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  padding-top: 14px;
+  gap: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 
@@ -1764,7 +1824,7 @@ onUnmounted(() => {
 
 .check-metric {
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .check-metric--right {
@@ -1773,7 +1833,7 @@ onUnmounted(() => {
 }
 
 .check-metric span {
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -1781,7 +1841,7 @@ onUnmounted(() => {
 }
 
 .check-metric strong {
-  font-size: 0.94rem;
+  font-size: 0.88rem;
   color: var(--text);
 }
 
@@ -2371,33 +2431,50 @@ onUnmounted(() => {
     width: 100%;
     min-width: 0;
     flex-direction: column;
+    align-items: center;
     justify-content: center;
-    gap: 10px;
-    padding-top: 12px;
-    padding-bottom: 12px;
+    gap: 6px;
+    padding-top: 8px;
+    padding-bottom: 8px;
   }
 
   .brand-button {
-    font-size: 1.5rem;
+    font-size: 1.18rem;
   }
 
   .brand-logo {
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
+  }
+
+  .dashboard-header__refresh {
+    width: 100%;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .dashboard-header__refresh::before,
+  .dashboard-header__refresh::after {
+    width: 14px;
+  }
+
+  .dashboard-header__refresh strong {
+    white-space: normal;
+    font-size: 0.96rem;
   }
 
   .dashboard-header__actions {
     width: 100%;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px 40px;
-    gap: 8px;
+    gap: 6px;
   }
 
   .header-action {
     width: 100%;
-    min-height: 40px;
-    padding: 0 10px;
-    font-size: 0.88rem;
+    min-height: 36px;
+    padding: 0 8px;
+    font-size: 0.82rem;
   }
 
   .header-action span {
@@ -2406,9 +2483,9 @@ onUnmounted(() => {
   }
 
   .icon-btn {
-    width: 40px;
-    min-height: 40px;
-    flex: 0 0 40px;
+    width: 36px;
+    min-height: 36px;
+    flex: 0 0 36px;
   }
 
   .page-header,

@@ -41,6 +41,8 @@ export const enMessages = {
     console: {
       brandTagline: 'Live Ops Engine',
       toggleTheme: 'Toggle theme',
+      lastUpdatedLabel: 'Last update',
+      lastUpdatedAt: 'Last update: {time}',
       newService: 'New service',
       activeServices: 'Active services ({count})',
       allOnline: 'All online',
