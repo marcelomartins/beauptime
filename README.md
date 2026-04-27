@@ -2,7 +2,7 @@
 
 **Full uptime monitoring at zero cost.** BeaUptime runs entirely inside Cloudflare's free-tier infrastructure — no servers to manage, no monthly bills, no vendor lock-in beyond what you already have for free.
 
-Open-source and self-hosted, BeaUptime combines a public status page, a private admin dashboard, scheduled checks, incident tracking, and optional email alerts — all deployed as a single Cloudflare Worker.
+Open-source and self-hosted, BeaUptime combines a public status page, a private admin dashboard, scheduled checks, incident tracking, and optional email alerts — all deployed as a single Cloudflare Worker on the free plan.
 
 <p align="center">
   <img src="./screenshot.png" alt="BeaUptime screenshot" width="1200" />
