@@ -1,20 +1,46 @@
-# BeaUptime
+# BeaUptime — Free Uptime Monitoring on Cloudflare's Free Plan
 
-Open-source uptime monitoring built for Cloudflare Workers.
+**Full uptime monitoring at zero cost.** BeaUptime runs entirely inside Cloudflare's free-tier infrastructure — no servers to manage, no monthly bills, no vendor lock-in beyond what you already have for free.
 
-BeaUptime combines a public status page, a private admin dashboard, scheduled checks, incident tracking, and optional email alerts in a single low-infrastructure deployment.
+Open-source and self-hosted, BeaUptime combines a public status page, a private admin dashboard, scheduled checks, incident tracking, and optional email alerts — all deployed as a single Cloudflare Worker.
 
 <p align="center">
   <img src="./screenshot.png" alt="BeaUptime screenshot" width="1200" />
 </p>
 
+---
+
+## 🆓 Zero Cost. No Servers. No Bills.
+
+BeaUptime is designed from the ground up to fit entirely within [Cloudflare's free plan](https://www.cloudflare.com/plans/):
+
+| Cloudflare Product | Free Plan Limit | How BeaUptime Uses It |
+| --- | --- | --- |
+| **Workers** | 100,000 req/day | API + static asset serving |
+| **Workers Cron Triggers** | 5 cron jobs | Scheduled monitoring every minute |
+| **D1 (SQLite)** | 5 GB storage, 5M reads/day | All check history and incident data |
+| **Email Routing** | Included on free zones | Optional downtime alert emails |
+
+> No credit card required. No surprise charges. No infrastructure to manage.
+> Just a Cloudflare account and a few `wrangler` commands.
+
+---
+
 ## Why BeaUptime
 
-- Deploy the app and API together as one Worker
-- Monitor both HTTP endpoints and TCP ports
-- Publish a public status page without exposing the admin console
-- Track incidents automatically when a service fails twice in a row
-- Keep operations simple with D1 for storage and Cloudflare cron triggers for scheduling
+Most uptime monitoring tools either cost money or require you to run your own server. BeaUptime eliminates both problems by running entirely on Cloudflare's edge — globally distributed, highly available, and **free for small deployments**.
+
+- ✅ **$0/month** — fits entirely within Cloudflare's free plan
+- ✅ **No server** — runs as a Cloudflare Worker, not a VPS or container
+- ✅ **No database to manage** — uses Cloudflare D1 (managed SQLite)
+- ✅ **Globally distributed** — Cloudflare's edge network handles availability
+- ✅ **One deployment** — app, API, and cron jobs in a single Worker
+- ✅ **Public status page** without exposing the admin console
+- ✅ Monitor both **HTTP endpoints** and **TCP ports**
+- ✅ Automatic incident lifecycle — open on failure, resolve on recovery
+- ✅ Optional **email alerts** via Cloudflare Email Routing (also free)
+
+---
 
 ## Features
 
@@ -29,15 +55,19 @@ BeaUptime combines a public status page, a private admin dashboard, scheduled ch
 - Uptime views for 1, 7, 30, 365, and 730-day windows
 - Static public pages served from Worker assets
 
+---
+
 ## Stack
 
-- Cloudflare Workers
-- Cloudflare D1
-- Hono
-- Vue 3
-- Vite + Vite SSG
-- TypeScript
-- Bun
+Everything runs on Cloudflare's free tier:
+
+- **Cloudflare Workers** — serverless compute (free plan)
+- **Cloudflare D1** — managed SQLite database (free plan)
+- **Cloudflare Cron Triggers** — scheduled monitoring (free plan)
+- **Cloudflare Email Routing** — alert emails (free, optional)
+- Hono · Vue 3 · Vite + Vite SSG · TypeScript · Bun
+
+---
 
 ## How It Works
 
@@ -58,11 +88,15 @@ Current scheduled jobs:
 - Every minute: probes enabled services
 - Daily at `03:17`: deletes old resolved incidents
 
+---
+
 ## Requirements
 
 - [Bun](https://bun.sh/)
-- A Cloudflare account
-- A Cloudflare D1 database
+- A Cloudflare account (free plan is enough)
+- A Cloudflare D1 database (created via `wrangler`, free)
+
+---
 
 ## Deploy To Cloudflare
 
@@ -145,6 +179,8 @@ bun run deploy
 ```
 
 The deploy script builds the frontend and Worker, then runs `wrangler deploy`.
+
+---
 
 ## Run Locally
 
@@ -239,6 +275,8 @@ Notes:
 - `ALERT_FROM_EMAIL` must belong to the domain where Email Routing is enabled
 - if you want to restrict delivery, configure the binding with `destination_address` or `allowed_destination_addresses`
 
+---
+
 ## Build
 
 ```bash
@@ -250,6 +288,8 @@ This generates:
 - `dist/web-vue/` for the frontend assets
 - `dist/worker-api/` for the Worker build output
 
+---
+
 ## Monitoring Model
 
 - Supported service types: `GET` and `TCP`
@@ -259,6 +299,8 @@ This generates:
 - Incidents are resolved automatically on the next successful check
 - Public status only shows enabled services
 
+---
+
 ## Routes
 
 - `/`: public landing page
@@ -267,6 +309,8 @@ This generates:
 - `/health`: health endpoint
 - `/auth/*`: login/session endpoints
 - `/api/v1/*`: monitor, services, status, and incidents APIs
+
+---
 
 ## Project Structure
 
@@ -278,6 +322,8 @@ This generates:
 |-- scripts/
 |-- wrangler.jsonc
 ```
+
+---
 
 ## Contributing
 
