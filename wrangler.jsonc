@@ -4,6 +4,7 @@
 	"compatibility_date": "2026-03-23",
 	"main": "./worker-api/src/index.ts",
 	"vars": {
+		// Replace with a random string for authentication
 		"AUTH_ROOT_SECRET": "change-me-to-a-random-string",
 		"ALERT_TO_EMAIL": "",
 		"ALERT_FROM_EMAIL": "",
