@@ -237,7 +237,6 @@ const formatRefreshTimestamp = (value?: string | null) => {
   }
 
   return new Intl.DateTimeFormat(currentLocale(), {
-    dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date(value))
 }
@@ -1484,7 +1483,7 @@ onUnmounted(() => {
   gap: 10px;
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--text-soft);
   font-size: clamp(1.3rem, 2.3vw, 1.8rem);
   font-weight: 800;
   letter-spacing: -0.04em;
@@ -1526,7 +1525,9 @@ onUnmounted(() => {
 }
 
 .dashboard-header__refresh strong {
-  font-size: 1.08rem;
+  font-size: clamp(1.3rem, 2.3vw, 1.8rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
   line-height: 1;
   color: var(--text);
   white-space: nowrap;
@@ -1591,7 +1592,7 @@ onUnmounted(() => {
   width: 100%;
   max-width: 1320px;
   margin: 0 auto;
-  padding: 12px 24px 32px;
+  padding: 10px 24px 0px;
 }
 
 .dashboard-body--detail {
@@ -2460,7 +2461,7 @@ onUnmounted(() => {
 
   .dashboard-header__refresh strong {
     white-space: normal;
-    font-size: 0.96rem;
+    font-size: 1.18rem;
   }
 
   .dashboard-header__actions {
