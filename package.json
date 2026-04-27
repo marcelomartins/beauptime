@@ -1,0 +1,31 @@
+{
+  "name": "bea-uptime",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "web-vue",
+    "worker-api",
+    "worker-shared/*"
+  ],
+  "scripts": {
+    "dev:web": "cd web-vue && bun run dev",
+    "dev:api": "cd worker-api && bun run dev",
+    "build:web": "bun ./scripts/build-web.mjs",
+    "build:api": "cd worker-api && bun run build",
+    "build": "bun run build:web && bun run build:api",
+    "typecheck:contracts": "cd worker-shared/contracts && bun run typecheck",
+    "typecheck:web": "cd web-vue && bun run typecheck",
+    "typecheck:api": "cd worker-api && bun run typecheck",
+    "typecheck": "bun run typecheck:contracts && bun run typecheck:web && bun run typecheck:api",
+    "test:api": "cd worker-api && bun run test",
+    "test": "bun run test:api",
+    "deploy": "bun ./scripts/deploy.mjs",
+    "d1:migrate:local": "bun ./scripts/d1-migrate.mjs local",
+    "d1:migrate:remote": "bun ./scripts/d1-migrate.mjs remote",
+    "cf:typegen": "wrangler types --config ./wrangler.jsonc --env-interface CloudflareBindings"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "wrangler": "^4.17.0"
+  }
+}

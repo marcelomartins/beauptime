@@ -1,0 +1,40 @@
+INSERT OR IGNORE INTO services (
+  slug,
+  name,
+  target,
+  type,
+  expected_status,
+  port,
+  timeout_ms,
+  enabled,
+  monitoring_started_at,
+  created_at,
+  updated_at
+)
+VALUES
+  (
+    'example-domain',
+    'Example Domain',
+    'https://example.com/',
+    'GET',
+    200,
+    NULL,
+    8000,
+    1,
+    '2026-04-24T00:00:00.000Z',
+    '2026-04-24T00:00:00.000Z',
+    '2026-04-24T00:00:00.000Z'
+  ),
+  (
+    'cloudflare-docs',
+    'Cloudflare Docs',
+    'https://developers.cloudflare.com/',
+    'GET',
+    200,
+    NULL,
+    8000,
+    1,
+    '2026-04-24T00:00:00.000Z',
+    '2026-04-24T00:00:00.000Z',
+    '2026-04-24T00:00:00.000Z'
+  );

@@ -1,0 +1,58 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "bea-uptime",
+	"compatibility_date": "2026-03-23",
+	"main": "./worker-api/src/index.ts",
+	"vars": {
+		"AUTH_ROOT_SECRET": "change-me-to-a-random-string",
+		"ALERT_TO_EMAIL": "",
+		"ALERT_FROM_EMAIL": "",
+		"SERVICE_LIMIT": "10",
+		"DEFAULT_TIMEOUT_MS": "8000",
+		"INCIDENT_RETENTION_DAYS": "730"
+	},
+	"assets": {
+		"directory": "./dist/web-vue",
+		"binding": "ASSETS",
+		"not_found_handling": "404-page",
+		"html_handling": "none",
+		"run_worker_first": true
+	},
+	"triggers": {
+		"crons": [
+			// Monitor enabled services every minute.
+			"*/1 * * * *",
+			// Run retention cleanup once a day outside the minute-by-minute sweep.
+			"17 3 * * *"
+		]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "bea-uptime",
+			// Replace with the D1 database id from your own Cloudflare account before remote deploys.
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "./worker-api/migrations"
+		}
+	],
+	"send_email": [
+		{
+			"name": "SEND_EMAIL"
+		}
+	],
+	"observability": {
+		"enabled": false,
+		"head_sampling_rate": 1,
+		"logs": {
+			"enabled": true,
+			"head_sampling_rate": 1,
+			"persist": true,
+			"invocation_logs": true
+		},
+		"traces": {
+			"enabled": false,
+			"persist": true,
+			"head_sampling_rate": 1
+		}
+	}
+}
