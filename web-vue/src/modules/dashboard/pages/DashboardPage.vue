@@ -2298,15 +2298,15 @@ onUnmounted(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 12px;
   row-gap: 10px;
+  align-items: start;
 }
 
 .overview-service-card {
-  --overview-card-height: 196px;
-  padding: 14px 16px;
+  --overview-card-height: 190px;
+  padding: 13px 15px 11px;
   display: grid;
-  gap: 12px;
-  min-height: var(--overview-card-height);
-  grid-template-rows: auto auto auto auto 1fr;
+  gap: 11px;
+  grid-template-rows: auto auto auto auto;
   overflow: hidden;
   cursor: pointer;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
@@ -2314,6 +2314,7 @@ onUnmounted(() => {
 
 .overview-service-card--expanded {
   min-height: calc(var(--overview-card-height) * 2);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
 .overview-service-card:hover {
@@ -2433,7 +2434,7 @@ onUnmounted(() => {
 }
 
 .signal-bars--overview {
-  min-height: 44px;
+  min-height: 42px;
   gap: 4px;
 }
 
@@ -2465,7 +2466,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  padding-top: 10px;
+  padding-top: 9px;
   border-top: 1px solid var(--border);
 }
 
@@ -3245,14 +3246,14 @@ onUnmounted(() => {
   }
 
   .overview-service-card {
-    --overview-card-height: 204px;
-    padding: 16px 18px;
+    --overview-card-height: 198px;
+    padding: 15px 17px 13px;
     border-radius: 20px;
-    min-height: var(--overview-card-height);
   }
 
   .overview-service-card--expanded {
     min-height: calc(var(--overview-card-height) * 2);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
   }
 
   .overview-service-card__head,
