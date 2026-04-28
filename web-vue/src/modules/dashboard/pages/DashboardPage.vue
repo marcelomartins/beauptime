@@ -49,19 +49,11 @@ type ResponseTimeHistoryPoint = {
   responseTimeMs: number | null
 }
 
-type ResponseTimeChartMarker = {
-  id: string
-  title: string
-  x: number
-  y: number
-}
-
 type ResponseTimeChartModel = {
   startLabel: string
   endLabel: string
   linePaths: string[]
-  areaPaths: string[]
-  markers: ResponseTimeChartMarker[]
+  yAxisTicks: Array<{ y: number; label: string }>
   hasData: boolean
 }
 
@@ -72,10 +64,13 @@ const RESPONSE_TIME_MAX_POINTS = 120
 const RESPONSE_TIME_RETENTION_MS = RESPONSE_TIME_RANGE_STEPS[RESPONSE_TIME_RANGE_STEPS.length - 1] * MINUTE_IN_MS
 const RESPONSE_TIME_CHART_WIDTH = 100
 const RESPONSE_TIME_CHART_HEIGHT = 64
-const RESPONSE_TIME_CHART_PADDING_X = 4
+const RESPONSE_TIME_CHART_PADDING_LEFT = 10
+const RESPONSE_TIME_CHART_PADDING_RIGHT = 4
 const RESPONSE_TIME_CHART_PADDING_TOP = 6
 const RESPONSE_TIME_CHART_PADDING_BOTTOM = 8
 const RESPONSE_TIME_CHART_BASELINE_Y = RESPONSE_TIME_CHART_HEIGHT - RESPONSE_TIME_CHART_PADDING_BOTTOM
+const RESPONSE_TIME_CHART_PLOT_START_X = RESPONSE_TIME_CHART_PADDING_LEFT
+const RESPONSE_TIME_CHART_PLOT_END_X = RESPONSE_TIME_CHART_WIDTH - RESPONSE_TIME_CHART_PADDING_RIGHT
 const TOAST_DURATION_MS = 4_000
 const responseTimeChartViewBox = `0 0 ${RESPONSE_TIME_CHART_WIDTH} ${RESPONSE_TIME_CHART_HEIGHT}`
 const responseTimeChartGridYs = [0.25, 0.5, 0.75].map((offset) => {
@@ -379,6 +374,23 @@ const formatLatency = (value?: number | null) => {
   return value == null ? t('services.status.noData') : `${Math.round(value)}ms`
 }
 
+const formatResponseTimeAxisLabel = (value: number) => {
+  return String(Math.round(value))
+}
+
+const buildResponseTimeYAxisTicks = (maxValue: number) => {
+  const tickOffsets = [0, 0.25, 0.5, 0.75]
+
+  return tickOffsets.map((offset) => {
+    const y = RESPONSE_TIME_CHART_PADDING_TOP + (RESPONSE_TIME_CHART_BASELINE_Y - RESPONSE_TIME_CHART_PADDING_TOP) * offset
+
+    return {
+      y,
+      label: formatResponseTimeAxisLabel(maxValue * (1 - offset)),
+    }
+  })
+}
+
 const formatDuration = (milliseconds: number) => {
   const totalMinutes = Math.max(0, Math.floor(milliseconds / 60_000))
   const days = Math.floor(totalMinutes / 1_440)
@@ -652,64 +664,17 @@ const resolveResponseTimeRangeMinutes = (samples: ResponseTimeHistoryPoint[]) =>
 }
 
 const buildResponseTimeLinePaths = (points: Array<{ x: number; y: number | null }>) => {
-  const paths: string[] = []
-  let commands: string[] = []
+  const commands: string[] = []
 
   for (const point of points) {
     if (point.y == null) {
-      if (commands.length > 0) {
-        paths.push(commands.join(' '))
-        commands = []
-      }
-
       continue
     }
 
     commands.push(commands.length === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`)
   }
 
-  if (commands.length > 0) {
-    paths.push(commands.join(' '))
-  }
-
-  return paths
-}
-
-const buildResponseTimeAreaPaths = (points: Array<{ x: number; y: number | null }>) => {
-  const paths: string[] = []
-  let segment: Array<{ x: number; y: number }> = []
-
-  const pushSegment = () => {
-    if (segment.length === 0) {
-      return
-    }
-
-    const firstPoint = segment[0]
-    const lastPoint = segment[segment.length - 1]
-    const commands = [
-      `M ${firstPoint.x} ${RESPONSE_TIME_CHART_BASELINE_Y}`,
-      `L ${firstPoint.x} ${firstPoint.y}`,
-      ...segment.slice(1).map((point) => `L ${point.x} ${point.y}`),
-      `L ${lastPoint.x} ${RESPONSE_TIME_CHART_BASELINE_Y}`,
-      'Z',
-    ]
-
-    paths.push(commands.join(' '))
-    segment = []
-  }
-
-  for (const point of points) {
-    if (point.y == null) {
-      pushSegment()
-      continue
-    }
-
-    segment.push({ x: point.x, y: point.y })
-  }
-
-  pushSegment()
-
-  return paths
+  return commands.length > 0 ? [commands.join(' ')] : []
 }
 
 const buildResponseTimeChart = (service: ServiceDetail): ResponseTimeChartModel => {
@@ -753,13 +718,13 @@ const buildResponseTimeChart = (service: ServiceDetail): ResponseTimeChartModel 
     bucket.pointsCount += 1
   }
 
-  const usableWidth = RESPONSE_TIME_CHART_WIDTH - RESPONSE_TIME_CHART_PADDING_X * 2
+  const usableWidth = RESPONSE_TIME_CHART_PLOT_END_X - RESPONSE_TIME_CHART_PLOT_START_X
   const usableHeight = RESPONSE_TIME_CHART_BASELINE_Y - RESPONSE_TIME_CHART_PADDING_TOP
   const points = buckets.map((bucket, index) => {
     const averageResponseTimeMs = bucket.pointsCount > 0 ? bucket.totalResponseTimeMs / bucket.pointsCount : null
     const x = bucketCount === 1
-      ? RESPONSE_TIME_CHART_WIDTH / 2
-      : RESPONSE_TIME_CHART_PADDING_X + (index * usableWidth) / (bucketCount - 1)
+      ? (RESPONSE_TIME_CHART_PLOT_START_X + RESPONSE_TIME_CHART_PLOT_END_X) / 2
+      : RESPONSE_TIME_CHART_PLOT_START_X + (index * usableWidth) / (bucketCount - 1)
 
     return {
       id: `${service.slug}-response-time-${bucket.startMs}`,
@@ -784,12 +749,7 @@ const buildResponseTimeChart = (service: ServiceDetail): ResponseTimeChartModel 
     startLabel: formatTimelinePoint(rangeStartMs),
     endLabel: formatTimelinePoint(rangeEndMs),
     linePaths: buildResponseTimeLinePaths(points),
-    areaPaths: buildResponseTimeAreaPaths(points),
-    markers: points.flatMap((point) => {
-      return point.y == null
-        ? []
-        : [{ id: point.id, title: point.title, x: point.x, y: point.y }]
-    }),
+    yAxisTicks: buildResponseTimeYAxisTicks(maxValue),
     hasData,
   }
 }
@@ -1609,17 +1569,27 @@ onUnmounted(() => {
                           v-for="gridY in responseTimeChartGridYs"
                           :key="`${service.slug}-grid-${gridY}`"
                           class="response-time-chart__grid"
-                          :x1="0"
-                          :x2="100"
+                          :x1="RESPONSE_TIME_CHART_PLOT_START_X"
+                          :x2="RESPONSE_TIME_CHART_PLOT_END_X"
                           :y1="gridY"
                           :y2="gridY"
                         />
-                        <line class="response-time-chart__baseline" :x1="0" :x2="100" :y1="56" :y2="56" />
-                        <path
-                          v-for="(path, index) in responseTimeChartFor(service.slug)?.areaPaths ?? []"
-                          :key="`${service.slug}-area-${index}`"
-                          class="response-time-chart__area"
-                          :d="path"
+                        <text
+                          v-for="tick in responseTimeChartFor(service.slug)?.yAxisTicks ?? []"
+                          :key="`${service.slug}-tick-${tick.y}`"
+                          class="response-time-chart__y-axis-label"
+                          :x="RESPONSE_TIME_CHART_PLOT_START_X - 2"
+                          :y="tick.y"
+                          text-anchor="end"
+                        >
+                          {{ tick.label }}
+                        </text>
+                        <line
+                          class="response-time-chart__baseline"
+                          :x1="RESPONSE_TIME_CHART_PLOT_START_X"
+                          :x2="RESPONSE_TIME_CHART_PLOT_END_X"
+                          :y1="56"
+                          :y2="56"
                         />
                         <path
                           v-for="(path, index) in responseTimeChartFor(service.slug)?.linePaths ?? []"
@@ -1627,16 +1597,6 @@ onUnmounted(() => {
                           class="response-time-chart__line"
                           :d="path"
                         />
-                        <circle
-                          v-for="marker in responseTimeChartFor(service.slug)?.markers ?? []"
-                          :key="marker.id"
-                          class="response-time-chart__dot"
-                          :cx="marker.x"
-                          :cy="marker.y"
-                          r="1.5"
-                        >
-                          <title>{{ marker.title }}</title>
-                        </circle>
                       </svg>
                     </div>
 
@@ -1886,17 +1846,27 @@ onUnmounted(() => {
                         v-for="gridY in responseTimeChartGridYs"
                         :key="`${activeService.slug}-detail-grid-${gridY}`"
                         class="response-time-chart__grid"
-                        :x1="0"
-                        :x2="100"
+                        :x1="RESPONSE_TIME_CHART_PLOT_START_X"
+                        :x2="RESPONSE_TIME_CHART_PLOT_END_X"
                         :y1="gridY"
                         :y2="gridY"
                       />
-                      <line class="response-time-chart__baseline" :x1="0" :x2="100" :y1="56" :y2="56" />
-                      <path
-                        v-for="(path, index) in activeResponseTimeChart?.areaPaths ?? []"
-                        :key="`${activeService.slug}-detail-area-${index}`"
-                        class="response-time-chart__area"
-                        :d="path"
+                      <text
+                        v-for="tick in activeResponseTimeChart?.yAxisTicks ?? []"
+                        :key="`${activeService.slug}-detail-tick-${tick.y}`"
+                        class="response-time-chart__y-axis-label"
+                        :x="RESPONSE_TIME_CHART_PLOT_START_X - 2"
+                        :y="tick.y"
+                        text-anchor="end"
+                      >
+                        {{ tick.label }}
+                      </text>
+                      <line
+                        class="response-time-chart__baseline"
+                        :x1="RESPONSE_TIME_CHART_PLOT_START_X"
+                        :x2="RESPONSE_TIME_CHART_PLOT_END_X"
+                        :y1="56"
+                        :y2="56"
                       />
                       <path
                         v-for="(path, index) in activeResponseTimeChart?.linePaths ?? []"
@@ -1904,16 +1874,6 @@ onUnmounted(() => {
                         class="response-time-chart__line"
                         :d="path"
                       />
-                      <circle
-                        v-for="marker in activeResponseTimeChart?.markers ?? []"
-                        :key="marker.id"
-                        class="response-time-chart__dot"
-                        :cx="marker.x"
-                        :cy="marker.y"
-                        r="1.7"
-                      >
-                        <title>{{ marker.title }}</title>
-                      </circle>
                     </svg>
                   </div>
 
@@ -2021,6 +1981,9 @@ onUnmounted(() => {
 }
 
 .dashboard-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--page-bg) 88%, transparent);
   backdrop-filter: blur(18px);
@@ -2575,22 +2538,18 @@ onUnmounted(() => {
   stroke: color-mix(in srgb, var(--text-faint) 34%, transparent);
 }
 
-.response-time-chart__area {
-  fill: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-
 .response-time-chart__line {
   fill: none;
   stroke: var(--accent-strong);
-  stroke-width: 1.7;
+  stroke-width: 1.1;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.response-time-chart__dot {
-  fill: var(--accent-strong);
-  stroke: var(--surface);
-  stroke-width: 0.8;
+.response-time-chart__y-axis-label {
+  fill: var(--text-faint);
+  font-size: 3.2px;
+  dominant-baseline: middle;
 }
 
 .response-time-chart__axis {
