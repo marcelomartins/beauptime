@@ -3234,6 +3234,7 @@ onUnmounted(() => {
 
 @media (max-width: 760px) {
   .dashboard-header {
+    position: static;
     overflow-x: visible;
   }
 
@@ -3265,6 +3266,7 @@ onUnmounted(() => {
 
   .dashboard-header__refresh {
     width: 100%;
+    flex: 0 0 auto;
     justify-content: center;
     gap: 10px;
   }
@@ -3289,6 +3291,7 @@ onUnmounted(() => {
   .header-switch {
     grid-column: 1 / -1;
     justify-content: center;
+    min-height: 44px;
     padding: 0 10px;
   }
 
@@ -3300,7 +3303,7 @@ onUnmounted(() => {
 
   .header-action {
     width: 100%;
-    min-height: 36px;
+    min-height: 44px;
     padding: 0 8px;
     font-size: 0.82rem;
   }
@@ -3312,7 +3315,7 @@ onUnmounted(() => {
 
   .icon-btn {
     width: 100%;
-    min-height: 36px;
+    min-height: 44px;
     flex: 0 0 auto;
   }
 

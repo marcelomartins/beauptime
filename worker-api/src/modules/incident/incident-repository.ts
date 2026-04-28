@@ -18,7 +18,6 @@ type IncidentQuery = {
 }
 
 type PublicIncidentRow = {
-  id: number
   service_name: string
   started_at: string
   resolved_at: string | null
@@ -47,7 +46,6 @@ const mapIncident = (row: IncidentRow): Incident => ({
 })
 
 const mapPublicIncident = (row: PublicIncidentRow): PublicStatusIncident => ({
-  id: row.id,
   serviceName: row.service_name,
   status: row.resolved_at ? 'resolved' : 'open',
   startedAt: row.started_at,
@@ -119,7 +117,6 @@ export const listPublicOpenIncidents = async (db: D1Database, limit = 10) => {
   const rows = await queryAll<PublicIncidentRow>(
     db.prepare(
       `SELECT
-         i.id,
          s.name AS service_name,
          i.started_at,
          i.resolved_at
@@ -138,7 +135,6 @@ export const listPublicRecentIncidents = async (db: D1Database, sinceIso: string
   const rows = await queryAll<PublicIncidentRow>(
     db.prepare(
       `SELECT
-         i.id,
          s.name AS service_name,
          i.started_at,
          i.resolved_at

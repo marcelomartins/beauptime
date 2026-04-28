@@ -14,7 +14,6 @@ describe('listPublicRecentIncidents', () => {
             return {
               all: async () => ({
                 results: [{
-                  id: 7,
                   service_name: 'Main API',
                   started_at: '2026-04-01T00:00:00.000Z',
                   resolved_at: '2026-04-20T12:00:00.000Z',
@@ -33,7 +32,6 @@ describe('listPublicRecentIncidents', () => {
     expect(query?.sql).toContain('ORDER BY i.resolved_at DESC')
     expect(query?.bindings).toEqual(['2026-04-14T00:00:00.000Z', 5])
     expect(incidents).toEqual([{
-      id: 7,
       serviceName: 'Main API',
       status: 'resolved',
       startedAt: '2026-04-01T00:00:00.000Z',
