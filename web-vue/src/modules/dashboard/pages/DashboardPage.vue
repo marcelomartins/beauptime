@@ -2021,9 +2021,6 @@ onUnmounted(() => {
 }
 
 .dashboard-header {
-  position: sticky;
-  top: 0;
-  z-index: 30;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--page-bg) 88%, transparent);
   backdrop-filter: blur(18px);
