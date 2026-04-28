@@ -241,9 +241,7 @@ export const enMessages = {
       unknown: 'Unknown',
     },
     currentState: {
-      downSince: 'Down for {time}',
-      upSince: 'Up for {time}',
-      noData: 'No recent signal',
+      lastChecked: 'Last checked {time}',
     },
     values: {
       noData: 'No data',
@@ -265,9 +263,7 @@ export const enMessages = {
     emptyServices: 'No active services were found for this status page.',
     lastCheck: 'Last probe {time}',
     metrics: {
-      lastCheck: 'Last probe',
-      lastResponse: 'Last response',
-      lastFailure: 'Last failure',
+      last48Hours: 'Last 48 hours',
     },
     incidents: {
       currentEyebrow: 'Now',

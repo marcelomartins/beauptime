@@ -1,15 +1,20 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import type { PublicStatusLevel, PublicStatusResponse, PublicStatusServiceSnapshot } from '@bea-uptime/contracts'
+import type { PublicStatusResponse } from '@bea-uptime/contracts'
 import type { AppEnv } from '@/env'
 import { nowIso } from '@/lib/db'
 import { ApiError } from '@/lib/errors'
 import { getOriginFromReferer, isAllowedOrigin } from '@/lib/origin'
 import { jsonSuccess } from '@/lib/response'
-import { listPublicOpenIncidents, listPublicRecentIncidents } from '@/modules/incident/incident-repository'
-import { listPublicServiceStatuses } from './status-repository'
+import {
+  listIncidentsOverlappingWindowByServiceIds,
+  listPublicOpenIncidents,
+  listPublicRecentIncidents,
+} from '@/modules/incident/incident-repository'
+import { buildPublicServiceStatuses, listPublicServiceStatuses } from './status-repository'
 
 const RECENT_INCIDENT_DAYS = 14
+const PUBLIC_STATUS_TIMELINE_DAYS = 2
 
 const daysToMilliseconds = (days: number) => days * 24 * 60 * 60 * 1000
 
@@ -39,37 +44,34 @@ const assertAllowedStatusRequest = (c: Context<AppEnv>) => {
   throw new ApiError(403, 'status_origin_required', 'Status data can only be requested from an allowed origin.')
 }
 
-const resolveOverallStatus = (services: PublicStatusServiceSnapshot[]): PublicStatusLevel => {
-  if (services.some((service) => service.status === 'outage')) {
-    return 'outage'
-  }
-
-  if (services.some((service) => service.status === 'unknown')) {
-    return 'unknown'
-  }
-
-  if (services.every((service) => service.status === 'paused')) {
-    return 'paused'
-  }
-
-  return 'operational'
-}
-
 export const statusModule = new Hono<AppEnv>()
 
 statusModule.get('/', async (c) => {
   assertAllowedStatusRequest(c)
 
   const generatedAt = nowIso()
-  const [services, openIncidents, recentIncidents] = await Promise.all([
-    listPublicServiceStatuses(c.env.DB),
+  const serviceRows = await listPublicServiceStatuses(c.env.DB)
+  const [timelineIncidents, openIncidents, recentIncidents] = await Promise.all([
+    listIncidentsOverlappingWindowByServiceIds(
+      c.env.DB,
+      serviceRows.map(service => service.id),
+      isoBefore(generatedAt, PUBLIC_STATUS_TIMELINE_DAYS),
+    ),
     listPublicOpenIncidents(c.env.DB),
     listPublicRecentIncidents(c.env.DB, isoBefore(generatedAt, RECENT_INCIDENT_DAYS)),
   ])
+  const incidentsByServiceId = new Map<number, typeof timelineIncidents>()
+
+  for (const incident of timelineIncidents) {
+    const incidents = incidentsByServiceId.get(incident.serviceId) ?? []
+    incidents.push(incident)
+    incidentsByServiceId.set(incident.serviceId, incidents)
+  }
+
+  const services = buildPublicServiceStatuses(serviceRows, incidentsByServiceId, new Date(generatedAt).getTime())
 
   const payload: PublicStatusResponse = {
     generatedAt,
-    overallStatus: resolveOverallStatus(services),
     services,
     openIncidents,
     recentIncidents,

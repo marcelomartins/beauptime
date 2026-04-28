@@ -12,12 +12,18 @@ export const publicRoutes: RouteRecordRaw[] = [
         path: '',
         name: 'home',
         component: HomePage,
-        meta: { redirectIfAuthenticated: true },
+        meta: {
+          centerContent: true,
+          redirectIfAuthenticated: true,
+        },
       },
       {
         path: 'status',
         name: 'status',
         component: StatusPage,
+        meta: {
+          centerContent: false,
+        },
       },
     ],
   },

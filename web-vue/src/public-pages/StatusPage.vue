@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { PublicStatusIncident, PublicStatusLevel, PublicStatusResponse, PublicStatusServiceSnapshot } from '@bea-uptime/contracts'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import AppMark from '@/components/brand/AppMark.vue'
 import { i18n } from '@/i18n'
 import { requestJson } from '@/lib/http'
 
@@ -52,21 +51,6 @@ const levelClass = (level: PublicStatusLevel) => `level-${level}`
 
 const statusLabel = (level: PublicStatusLevel) => t(STATUS_LABEL_KEYS[level])
 
-const formatResponseTime = (value: number | null) => {
-  return value == null ? t('statusPage.values.noData') : `${value}ms`
-}
-
-const formatDate = (value: string | null | undefined) => {
-  if (!value) {
-    return t('statusPage.values.never')
-  }
-
-  return new Intl.DateTimeFormat(currentLocale(), {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value))
-}
-
 const formatRelativeTime = (value: string | null | undefined) => {
   if (!value) {
     return t('statusPage.values.never')
@@ -86,23 +70,20 @@ const formatRelativeTime = (value: string | null | undefined) => {
   return t('statusPage.relativeTime.daysAgo', { count: elapsedDays })
 }
 
+const formatDate = (value: string | null | undefined) => {
+  if (!value) {
+    return t('statusPage.values.never')
+  }
+
+  return new Intl.DateTimeFormat(currentLocale(), {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
+
 const formatDuration = (startedAt: string, resolvedAt: string | null) => {
   const end = resolvedAt ? new Date(resolvedAt).getTime() : Date.now()
   const totalMinutes = Math.max(0, Math.floor((end - new Date(startedAt).getTime()) / 60_000))
-  const days = Math.floor(totalMinutes / 1_440)
-  const hours = Math.floor((totalMinutes % 1_440) / 60)
-  const minutes = totalMinutes % 60
-  const parts: string[] = []
-
-  if (days > 0) parts.push(t('statusPage.duration.days', { count: days }))
-  if (hours > 0) parts.push(t('statusPage.duration.hours', { count: hours }))
-  if (minutes > 0 || parts.length === 0) parts.push(t('statusPage.duration.minutes', { count: minutes }))
-
-  return parts.join(', ')
-}
-
-const formatCurrentStateDuration = (startedAt: string) => {
-  const totalMinutes = Math.max(1, Math.floor((Date.now() - new Date(startedAt).getTime()) / 60_000))
   const days = Math.floor(totalMinutes / 1_440)
   const hours = Math.floor((totalMinutes % 1_440) / 60)
   const minutes = totalMinutes % 60
@@ -120,15 +101,19 @@ const incidentTitle = (incident: PublicStatusIncident) => {
 }
 
 const statusSummary = (service: PublicStatusServiceSnapshot) => {
-  if (service.status === 'outage' && service.currentStateStartedAt) {
-    return t('statusPage.currentState.downSince', { time: formatCurrentStateDuration(service.currentStateStartedAt) })
+  return t('statusPage.currentState.lastChecked', { time: formatRelativeTime(service.lastCheckedAt) })
+}
+
+const formatUptimePercent = (value: number | null) => {
+  if (value == null) {
+    return '--'
   }
 
-  if (service.status === 'operational' && service.currentStateStartedAt) {
-    return t('statusPage.currentState.upSince', { time: formatCurrentStateDuration(service.currentStateStartedAt) })
-  }
+  return `${value.toFixed(3).replace(/\.?0+$/, '')}%`
+}
 
-  return t('statusPage.currentState.noData')
+const serviceTimelineUptime = (service: PublicStatusServiceSnapshot) => {
+  return formatUptimePercent(service.uptimePercentage48h)
 }
 
 onMounted(() => {
@@ -149,14 +134,6 @@ onUnmounted(() => {
 
 <template>
   <div class="status-page">
-    <header class="status-topbar">
-      <RouterLink class="brand" to="/">
-        <AppMark class="brand-logo" />
-        <span>{{ t('app.name') }}</span>
-      </RouterLink>
-      <span class="topbar-copy">{{ t('statusPage.publicStatus') }}</span>
-    </header>
-
     <div v-if="errorMessage" class="status-alert">{{ errorMessage }}</div>
 
     <section class="status-section">
@@ -168,7 +145,7 @@ onUnmounted(() => {
       <div v-else-if="services.length === 0" class="empty-card">{{ t('statusPage.emptyServices') }}</div>
 
       <div v-else class="services-list">
-        <article v-for="service in services" :key="service.slug" class="service-card">
+        <article v-for="service in services" :key="service.name" class="service-card">
           <div class="service-main">
             <div class="service-copy">
               <h3>{{ service.name }}</h3>
@@ -177,14 +154,19 @@ onUnmounted(() => {
             <span class="service-state" :class="levelClass(service.status)">{{ statusLabel(service.status) }}</span>
           </div>
 
-          <div class="service-metrics">
-            <div class="metric-block compact">
-              <span>{{ t('statusPage.metrics.lastCheck') }}</span>
-              <strong>{{ formatRelativeTime(service.lastCheckedAt) }}</strong>
+          <div class="service-timeline">
+            <div class="signal-bars signal-bars--status" :aria-label="t('statusPage.metrics.last48Hours')">
+              <span
+                v-for="(bar, index) in service.checks48h"
+                :key="`${service.name}-${index}`"
+                class="signal-bar"
+                :class="bar === 'fail' ? 'is-fail' : bar === 'ok' ? 'is-ok' : 'is-empty'"
+              ></span>
             </div>
-            <div class="metric-block compact">
-              <span>{{ t('statusPage.metrics.lastResponse') }}</span>
-              <strong>{{ formatResponseTime(service.lastResponseTimeMs) }}</strong>
+
+            <div class="timeline-caption">
+              <span>{{ t('statusPage.metrics.last48Hours') }}</span>
+              <strong>{{ serviceTimelineUptime(service) }}</strong>
             </div>
           </div>
         </article>
@@ -202,7 +184,7 @@ onUnmounted(() => {
 
         <div v-if="openIncidents.length === 0" class="empty-card small">{{ t('statusPage.incidents.noOpen') }}</div>
 
-        <article v-for="incident in openIncidents" :key="incident.id" class="incident-card active">
+        <article v-for="incident in openIncidents" :key="`${incident.serviceName}-${incident.startedAt}`" class="incident-card active">
           <div class="incident-card__headline">
             <span>{{ incidentTitle(incident) }}</span>
             <strong>{{ incident.serviceName }}</strong>
@@ -221,7 +203,7 @@ onUnmounted(() => {
 
         <div v-if="recentIncidents.length === 0" class="empty-card small">{{ t('statusPage.incidents.noRecent') }}</div>
 
-        <article v-for="incident in recentIncidents" :key="incident.id" class="incident-card">
+        <article v-for="incident in recentIncidents" :key="`${incident.serviceName}-${incident.startedAt}`" class="incident-card">
           <div class="incident-card__headline">
             <span>{{ incidentTitle(incident) }}</span>
             <strong>{{ incident.serviceName }}</strong>
@@ -237,11 +219,10 @@ onUnmounted(() => {
 .status-page {
   width: min(1120px, 100%);
   min-height: 100vh;
-  padding: 24px 0 56px;
+  padding: 0 0 56px;
   color: var(--text);
 }
 
-.status-topbar,
 .service-main {
   display: flex;
   align-items: center;
@@ -249,32 +230,13 @@ onUnmounted(() => {
   gap: 16px;
 }
 
-.status-topbar {
-  margin-bottom: 28px;
-}
-
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 1.05rem;
-  font-weight: 800;
-}
-
-.brand-logo {
-  width: 26px;
-  height: 26px;
-  flex: 0 0 auto;
-}
-
-.service-metrics,
+.service-timeline,
 .incident-grid {
   display: grid;
   gap: 16px;
 }
 
-.service-metrics {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+.service-timeline {
   margin-top: 16px;
 }
 
@@ -290,24 +252,6 @@ onUnmounted(() => {
 .service-copy p {
   margin-top: 6px;
   color: var(--text-soft);
-}
-
-.metric-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.metric-block span {
-  color: var(--text-soft);
-  font-size: 0.82rem;
-}
-
-.metric-block strong {
-  line-height: 1.3;
-  white-space: normal;
-  word-break: break-word;
 }
 
 .service-state {
@@ -329,6 +273,57 @@ onUnmounted(() => {
   border-radius: 18px;
   padding: 18px;
   background: var(--surface);
+}
+.updated-at,
+.timeline-caption span {
+  margin: 0px 10px 10px 10px;
+  color: var(--text-soft);
+}
+
+.signal-bars {
+  display: grid;
+  align-items: end;
+}
+
+.signal-bars--status {
+  grid-template-columns: repeat(48, minmax(0, 1fr));
+  min-height: 44px;
+  gap: 4px;
+}
+
+.signal-bar {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.signal-bar.is-ok {
+  background: var(--success);
+}
+
+.signal-bar.is-fail {
+  background: var(--danger);
+}
+
+.signal-bar.is-empty {
+  background: color-mix(in srgb, var(--border) 65%, var(--surface));
+}
+
+.timeline-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.78rem;
+}
+
+.timeline-caption strong {
+  margin: 0;
+  font-weight: 800;
+  color: var(--text);
 }
 
 .services-list,
@@ -370,10 +365,16 @@ onUnmounted(() => {
 }
 
 @media (max-width: 720px) {
-  .status-topbar,
-  .service-main {
+  .service-main,
+  .timeline-caption {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .signal-bars--status {
+    grid-template-columns: repeat(24, minmax(0, 1fr));
+    grid-template-rows: repeat(2, 44px);
+    min-height: 92px;
   }
 
   .service-state {

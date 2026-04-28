@@ -124,17 +124,17 @@ export type ServiceTimeline24h = {
 
 export type PublicStatusLevel = 'operational' | 'outage' | 'paused' | 'unknown'
 
+export type PublicStatusCheckState = 'ok' | 'fail' | 'empty'
+
 export type PublicStatusServiceSnapshot = {
-  slug: string
   name: string
   status: PublicStatusLevel
-  currentStateStartedAt: string | null
   lastCheckedAt: string | null
-  lastResponseTimeMs: number | null
+  checks48h: PublicStatusCheckState[]
+  uptimePercentage48h: number | null
 }
 
 export type PublicStatusIncident = {
-  id: number
   serviceName: string
   status: IncidentStatus
   startedAt: string
@@ -143,7 +143,6 @@ export type PublicStatusIncident = {
 
 export type PublicStatusResponse = {
   generatedAt: string
-  overallStatus: PublicStatusLevel
   services: PublicStatusServiceSnapshot[]
   openIncidents: PublicStatusIncident[]
   recentIncidents: PublicStatusIncident[]
