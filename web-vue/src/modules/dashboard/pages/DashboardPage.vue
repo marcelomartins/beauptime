@@ -72,6 +72,7 @@ const RESPONSE_TIME_CHART_BASELINE_Y = RESPONSE_TIME_CHART_HEIGHT - RESPONSE_TIM
 const RESPONSE_TIME_CHART_PLOT_START_X = RESPONSE_TIME_CHART_PADDING_LEFT
 const RESPONSE_TIME_CHART_PLOT_END_X = RESPONSE_TIME_CHART_WIDTH - RESPONSE_TIME_CHART_PADDING_RIGHT
 const TOAST_DURATION_MS = 4_000
+const LIVE_REFRESH_CRITICAL_CYCLE_THRESHOLD = 3
 const responseTimeChartViewBox = `0 0 ${RESPONSE_TIME_CHART_WIDTH} ${RESPONSE_TIME_CHART_HEIGHT}`
 const responseTimeChartGridYs = [0.25, 0.5, 0.75].map((offset) => {
   return RESPONSE_TIME_CHART_PADDING_TOP + (RESPONSE_TIME_CHART_BASELINE_Y - RESPONSE_TIME_CHART_PADDING_TOP) * offset
@@ -96,7 +97,11 @@ const saving = ref(false)
 const testing = ref(false)
 const deleting = ref(false)
 const refreshingLiveData = ref(false)
-const lastDashboardRefreshAt = ref<string | null>(null)
+const lastSuccessfulDashboardDataAt = ref<string | null>(null)
+const consecutiveUnhealthyRefreshCycles = ref(0)
+const unhealthyRefreshErrorCycles = ref(0)
+const unhealthyRefreshStaleCycles = ref(0)
+const lastLiveRefreshErrorMessage = ref('')
 const errorMessage = ref('')
 const statusMessage = ref('')
 const liveRefreshIntervalMs = 30_000
@@ -315,7 +320,7 @@ const formatDate = (value?: string | null) => {
 
 const formatRefreshTimestamp = (value?: string | null) => {
   if (!value) {
-    return t('dashboard.console.never')
+    return ''
   }
 
   return new Intl.DateTimeFormat(currentLocale(), {
@@ -323,14 +328,122 @@ const formatRefreshTimestamp = (value?: string | null) => {
   }).format(new Date(value))
 }
 
-const markDashboardRefreshed = () => {
-  lastDashboardRefreshAt.value = new Date().toISOString()
+const hasEnabledMonitoring = (services: Array<Pick<ServiceDetail, 'enabled'>>) => {
+  return services.some(service => service.enabled)
 }
 
-const lastRefreshLabel = computed(() => {
-  return t('dashboard.console.lastUpdatedAt', {
-    time: formatRefreshTimestamp(lastDashboardRefreshAt.value),
-  })
+const resolveLatestMonitoredCheckAt = (services: Array<Pick<ServiceDetail, 'enabled' | 'runtime'>>) => {
+  let latestCheckAt: string | null = null
+
+  for (const service of services) {
+    const checkedAt = service.enabled ? service.runtime.lastCheckAt : null
+
+    if (!checkedAt) {
+      continue
+    }
+
+    if (!latestCheckAt || new Date(checkedAt).getTime() > new Date(latestCheckAt).getTime()) {
+      latestCheckAt = checkedAt
+    }
+  }
+
+  return latestCheckAt
+}
+
+const resetUnhealthyRefreshCycleState = () => {
+  consecutiveUnhealthyRefreshCycles.value = 0
+  unhealthyRefreshErrorCycles.value = 0
+  unhealthyRefreshStaleCycles.value = 0
+  lastLiveRefreshErrorMessage.value = ''
+}
+
+const syncDashboardRefreshSnapshot = (services: Array<Pick<ServiceDetail, 'enabled' | 'runtime'>>) => {
+  lastSuccessfulDashboardDataAt.value = resolveLatestMonitoredCheckAt(services)
+  resetUnhealthyRefreshCycleState()
+}
+
+const markUnhealthyLiveRefreshCycle = (
+  services: Array<Pick<ServiceDetail, 'enabled'>>,
+  reason: 'stale' | 'error',
+  details?: { errorMessage?: string },
+) => {
+  if (!hasEnabledMonitoring(services)) {
+    resetUnhealthyRefreshCycleState()
+    return
+  }
+
+  consecutiveUnhealthyRefreshCycles.value += 1
+
+  if (reason === 'error') {
+    unhealthyRefreshErrorCycles.value += 1
+
+    if (details?.errorMessage) {
+      lastLiveRefreshErrorMessage.value = details.errorMessage
+    }
+
+    return
+  }
+
+  unhealthyRefreshStaleCycles.value += 1
+}
+
+const handleSuccessfulLiveRefresh = (services: Array<Pick<ServiceDetail, 'enabled' | 'runtime'>>) => {
+  const latestCheckAt = resolveLatestMonitoredCheckAt(services)
+
+  if (!hasEnabledMonitoring(services)) {
+    resetUnhealthyRefreshCycleState()
+    return
+  }
+
+  if (
+    latestCheckAt
+    && (!lastSuccessfulDashboardDataAt.value || new Date(latestCheckAt).getTime() > new Date(lastSuccessfulDashboardDataAt.value).getTime())
+  ) {
+    lastSuccessfulDashboardDataAt.value = latestCheckAt
+    resetUnhealthyRefreshCycleState()
+    return
+  }
+
+  markUnhealthyLiveRefreshCycle(services, 'stale')
+}
+
+const isDashboardRefreshCritical = computed(() => {
+  return hasEnabledMonitoring(servicesStore.items)
+    && consecutiveUnhealthyRefreshCycles.value >= LIVE_REFRESH_CRITICAL_CYCLE_THRESHOLD
+})
+
+const dashboardRefreshTooltip = computed(() => {
+  if (!isDashboardRefreshCritical.value) {
+    return undefined
+  }
+
+  const count = consecutiveUnhealthyRefreshCycles.value
+  const hasErrors = unhealthyRefreshErrorCycles.value > 0
+  const hasStaleCycles = unhealthyRefreshStaleCycles.value > 0
+
+  if (hasErrors && hasStaleCycles) {
+    return lastLiveRefreshErrorMessage.value
+      ? t('dashboard.console.refreshCriticalMixedWithMessage', {
+          count,
+          message: lastLiveRefreshErrorMessage.value,
+        })
+      : t('dashboard.console.refreshCriticalMixed', { count })
+  }
+
+  if (hasErrors) {
+    return lastLiveRefreshErrorMessage.value
+      ? t('dashboard.console.refreshCriticalErrorsWithMessage', {
+          count,
+          message: lastLiveRefreshErrorMessage.value,
+        })
+      : t('dashboard.console.refreshCriticalErrors', { count })
+  }
+
+  if (!lastSuccessfulDashboardDataAt.value) {
+    return t('dashboard.console.refreshCriticalNoData', { count })
+  }
+
+  return t('dashboard.console.refreshCriticalStale', { count })
 })
 
 const formatRelativeTime = (value?: string | null) => {
@@ -1035,7 +1148,7 @@ const bootstrap = async () => {
     await servicesStore.fetchServices()
     establishResponseTimeBaselines(servicesStore.items)
     await loadTimeline24h()
-    markDashboardRefreshed()
+    syncDashboardRefreshSnapshot(servicesStore.items)
     errorMessage.value = ''
   } catch (error) {
     errorMessage.value = messageFrom(error, t('dashboard.console.errors.bootstrapFailed'))
@@ -1061,9 +1174,11 @@ const refreshLiveData = async () => {
         : Promise.resolve(),
       panelMode.value === 'incidents' ? fetchIncidentList() : Promise.resolve(),
     ])
-    markDashboardRefreshed()
+    handleSuccessfulLiveRefresh(servicesStore.items)
   } catch (error) {
-    errorMessage.value = messageFrom(error, t('dashboard.console.errors.liveRefreshFailed'))
+    const refreshErrorMessage = messageFrom(error, t('dashboard.console.errors.liveRefreshFailed'))
+    markUnhealthyLiveRefreshCycle(servicesStore.items, 'error', { errorMessage: refreshErrorMessage })
+    errorMessage.value = refreshErrorMessage
   } finally {
     refreshingLiveData.value = false
   }
@@ -1402,8 +1517,8 @@ onUnmounted(() => {
           <span>{{ $t('app.name') }}</span>
         </button>
 
-        <div class="dashboard-header__refresh" :title="lastRefreshLabel">
-          <strong>{{ formatRefreshTimestamp(lastDashboardRefreshAt) }}</strong>
+        <div class="dashboard-header__refresh" :class="{ 'is-critical': isDashboardRefreshCritical }" :title="dashboardRefreshTooltip">
+          <strong>{{ formatRefreshTimestamp(lastSuccessfulDashboardDataAt) }}</strong>
         </div>
 
         <div class="dashboard-header__actions">
@@ -2125,6 +2240,11 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--text-faint) 55%, transparent);
 }
 
+.dashboard-header__refresh.is-critical::before,
+.dashboard-header__refresh.is-critical::after {
+  background: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
 .dashboard-header__refresh strong {
   font-size: clamp(1.3rem, 2.3vw, 1.8rem);
   font-weight: 800;
@@ -2133,6 +2253,10 @@ onUnmounted(() => {
   color: var(--text);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.dashboard-header__refresh.is-critical strong {
+  color: var(--danger);
 }
 
 .header-action,
