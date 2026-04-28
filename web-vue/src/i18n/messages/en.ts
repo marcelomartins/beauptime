@@ -77,6 +77,8 @@ export const enMessages = {
       lastSuccessfulCheck: 'Last probe',
       lastSuccessfulCheckCard: 'Last successful probe',
       responseTime: 'Last response time',
+      responseTimeCharts: 'Charts',
+      responseTimeChartLabel: 'Response time chart for {service}',
       lastFailureMessage: 'Last failure',
       serviceHealthLabel: 'Service health summary',
       upTime: 'Up time',

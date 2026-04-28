@@ -6,7 +6,7 @@ import type {
   ServiceUptimeSummary,
   UpsertServiceInput,
 } from '@bea-uptime/contracts'
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppMark from '@/components/brand/AppMark.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -44,8 +44,43 @@ type TimelineBar = {
   title: string
 }
 
+type ResponseTimeHistoryPoint = {
+  checkedAt: string
+  responseTimeMs: number | null
+}
+
+type ResponseTimeChartMarker = {
+  id: string
+  title: string
+  x: number
+  y: number
+}
+
+type ResponseTimeChartModel = {
+  startLabel: string
+  endLabel: string
+  linePaths: string[]
+  areaPaths: string[]
+  markers: ResponseTimeChartMarker[]
+  hasData: boolean
+}
+
 const MINUTE_IN_MS = 60 * 1000
 const HOUR_IN_MS = 60 * MINUTE_IN_MS
+const RESPONSE_TIME_RANGE_STEPS = [15, 30, 60, 120, 240, 360] as const
+const RESPONSE_TIME_MAX_POINTS = 120
+const RESPONSE_TIME_RETENTION_MS = RESPONSE_TIME_RANGE_STEPS[RESPONSE_TIME_RANGE_STEPS.length - 1] * MINUTE_IN_MS
+const RESPONSE_TIME_CHART_WIDTH = 100
+const RESPONSE_TIME_CHART_HEIGHT = 64
+const RESPONSE_TIME_CHART_PADDING_X = 4
+const RESPONSE_TIME_CHART_PADDING_TOP = 6
+const RESPONSE_TIME_CHART_PADDING_BOTTOM = 8
+const RESPONSE_TIME_CHART_BASELINE_Y = RESPONSE_TIME_CHART_HEIGHT - RESPONSE_TIME_CHART_PADDING_BOTTOM
+const TOAST_DURATION_MS = 4_000
+const responseTimeChartViewBox = `0 0 ${RESPONSE_TIME_CHART_WIDTH} ${RESPONSE_TIME_CHART_HEIGHT}`
+const responseTimeChartGridYs = [0.25, 0.5, 0.75].map((offset) => {
+  return RESPONSE_TIME_CHART_PADDING_TOP + (RESPONSE_TIME_CHART_BASELINE_Y - RESPONSE_TIME_CHART_PADDING_TOP) * offset
+})
 
 const route = useRoute()
 const router = useRouter()
@@ -71,10 +106,62 @@ const errorMessage = ref('')
 const statusMessage = ref('')
 const liveRefreshIntervalMs = 30_000
 let liveRefreshTimer: ReturnType<typeof setInterval> | undefined
+let statusMessageTimer: ReturnType<typeof setTimeout> | undefined
+let errorMessageTimer: ReturnType<typeof setTimeout> | undefined
 
 const theme = ref<'light' | 'dark'>('light')
+const responseTimeChartsEnabled = ref(false)
+const responseTimeHistoryBySlug = ref<Record<string, ResponseTimeHistoryPoint[]>>({})
+const observedResponseTimeCheckAtBySlug = ref<Record<string, string | null>>({})
+const responseTimeBaselineReadyBySlug = ref<Record<string, true>>({})
+const collapsedOverviewCardHeightsBySlug = ref<Record<string, number>>({})
 
 const currentLocale = () => String(i18n.global.locale.value)
+
+const syncCollapsedOverviewCardHeights = async () => {
+  await nextTick()
+
+  const nextHeights: Record<string, number> = {}
+  const overviewCardElements = Array.from(document.querySelectorAll<HTMLElement>('[data-overview-service-card]'))
+
+  for (const cardElement of overviewCardElements) {
+    const slug = cardElement.dataset.overviewServiceCard
+
+    if (!slug) {
+      continue
+    }
+
+    const measuredHeight = Math.ceil(cardElement.getBoundingClientRect().height)
+
+    if (measuredHeight > 0) {
+      nextHeights[slug] = measuredHeight
+    }
+  }
+
+  collapsedOverviewCardHeightsBySlug.value = nextHeights
+}
+
+const toggleResponseTimeCharts = async (event: Event) => {
+  const nextChecked = event.target instanceof HTMLInputElement ? event.target.checked : false
+
+  if (nextChecked) {
+    await syncCollapsedOverviewCardHeights()
+  }
+
+  responseTimeChartsEnabled.value = nextChecked
+}
+
+const overviewCardStyle = (slug: string) => {
+  if (!responseTimeChartsEnabled.value) {
+    return undefined
+  }
+
+  const collapsedHeight = collapsedOverviewCardHeightsBySlug.value[slug]
+
+  return collapsedHeight
+    ? { height: `${collapsedHeight * 2}px` }
+    : { height: 'calc(var(--overview-card-height) * 2)' }
+}
 
 const toggleTheme = () => {
   const next = theme.value === 'dark' ? 'light' : 'dark'
@@ -411,6 +498,302 @@ const formatTimelineRange = (slotStartMs: number, slotEndMs: number) => {
   })}`
 }
 
+const toTimestampMs = (value?: string | null) => {
+  if (!value) {
+    return Number.NaN
+  }
+
+  return new Date(value).getTime()
+}
+
+const pruneResponseTimeHistory = (samples: ResponseTimeHistoryPoint[], nowMs: number) => {
+  const cutoffMs = nowMs - RESPONSE_TIME_RETENTION_MS
+
+  return [...samples]
+    .filter((sample) => {
+      const checkedAtMs = toTimestampMs(sample.checkedAt)
+      return Number.isFinite(checkedAtMs) && checkedAtMs >= cutoffMs
+    })
+    .sort((left, right) => toTimestampMs(left.checkedAt) - toTimestampMs(right.checkedAt))
+}
+
+const establishResponseTimeBaselines = (services: ServiceDetail[]) => {
+  const nowMs = Date.now()
+  const nextHistory: Record<string, ResponseTimeHistoryPoint[]> = {}
+  const nextObservedCheckAt: Record<string, string | null> = {}
+  const nextBaselineReady: Record<string, true> = {}
+
+  for (const service of services) {
+    const hasObservedCheckAt = Object.prototype.hasOwnProperty.call(observedResponseTimeCheckAtBySlug.value, service.slug)
+
+    nextHistory[service.slug] = pruneResponseTimeHistory(responseTimeHistoryBySlug.value[service.slug] ?? [], nowMs)
+    nextObservedCheckAt[service.slug] = hasObservedCheckAt
+      ? observedResponseTimeCheckAtBySlug.value[service.slug] ?? null
+      : service.runtime.lastCheckAt ?? null
+    nextBaselineReady[service.slug] = true
+  }
+
+  responseTimeHistoryBySlug.value = nextHistory
+  observedResponseTimeCheckAtBySlug.value = nextObservedCheckAt
+  responseTimeBaselineReadyBySlug.value = nextBaselineReady
+}
+
+const collectFreshResponseTimes = (services: ServiceDetail[]) => {
+  const nowMs = Date.now()
+  const nextHistory: Record<string, ResponseTimeHistoryPoint[]> = {}
+  const nextObservedCheckAt: Record<string, string | null> = {}
+  const nextBaselineReady: Record<string, true> = {}
+
+  for (const service of services) {
+    const history = pruneResponseTimeHistory(responseTimeHistoryBySlug.value[service.slug] ?? [], nowMs)
+    const currentCheckAt = service.runtime.lastCheckAt ?? null
+    const hasBaseline = Boolean(responseTimeBaselineReadyBySlug.value[service.slug])
+
+    if (!hasBaseline) {
+      nextHistory[service.slug] = history
+      nextObservedCheckAt[service.slug] = currentCheckAt
+      nextBaselineReady[service.slug] = true
+      continue
+    }
+
+    const previousCheckAt = observedResponseTimeCheckAtBySlug.value[service.slug] ?? null
+    const hasKnownPoint = currentCheckAt ? history.some((point) => point.checkedAt === currentCheckAt) : false
+    const nextServiceHistory = currentCheckAt && currentCheckAt !== previousCheckAt && !hasKnownPoint
+      ? pruneResponseTimeHistory(
+          [...history, { checkedAt: currentCheckAt, responseTimeMs: service.runtime.lastResponseTimeMs }],
+          nowMs,
+        )
+      : history
+
+    nextHistory[service.slug] = nextServiceHistory
+    nextObservedCheckAt[service.slug] = currentCheckAt
+    nextBaselineReady[service.slug] = true
+  }
+
+  responseTimeHistoryBySlug.value = nextHistory
+  observedResponseTimeCheckAtBySlug.value = nextObservedCheckAt
+  responseTimeBaselineReadyBySlug.value = nextBaselineReady
+}
+
+const moveResponseTimeHistory = (fromSlug: string, toSlug: string) => {
+  if (!fromSlug || fromSlug === toSlug) {
+    return
+  }
+
+  const fromHistory = responseTimeHistoryBySlug.value[fromSlug]
+  const fromObservedCheckAt = observedResponseTimeCheckAtBySlug.value[fromSlug]
+  const hadBaseline = responseTimeBaselineReadyBySlug.value[fromSlug]
+
+  if (!fromHistory && fromObservedCheckAt == null && !hadBaseline) {
+    return
+  }
+
+  const nextHistory = { ...responseTimeHistoryBySlug.value }
+  const nextObservedCheckAt = { ...observedResponseTimeCheckAtBySlug.value }
+  const nextBaselineReady = { ...responseTimeBaselineReadyBySlug.value }
+
+  if (fromHistory) {
+    nextHistory[toSlug] = fromHistory
+  }
+
+  if (fromObservedCheckAt !== undefined) {
+    nextObservedCheckAt[toSlug] = fromObservedCheckAt
+  }
+
+  if (hadBaseline) {
+    nextBaselineReady[toSlug] = true
+  }
+
+  delete nextHistory[fromSlug]
+  delete nextObservedCheckAt[fromSlug]
+  delete nextBaselineReady[fromSlug]
+
+  responseTimeHistoryBySlug.value = nextHistory
+  observedResponseTimeCheckAtBySlug.value = nextObservedCheckAt
+  responseTimeBaselineReadyBySlug.value = nextBaselineReady
+}
+
+const dropResponseTimeHistory = (slug: string) => {
+  if (!slug) {
+    return
+  }
+
+  const nextHistory = { ...responseTimeHistoryBySlug.value }
+  const nextObservedCheckAt = { ...observedResponseTimeCheckAtBySlug.value }
+  const nextBaselineReady = { ...responseTimeBaselineReadyBySlug.value }
+
+  delete nextHistory[slug]
+  delete nextObservedCheckAt[slug]
+  delete nextBaselineReady[slug]
+
+  responseTimeHistoryBySlug.value = nextHistory
+  observedResponseTimeCheckAtBySlug.value = nextObservedCheckAt
+  responseTimeBaselineReadyBySlug.value = nextBaselineReady
+}
+
+const resolveResponseTimeRangeMinutes = (samples: ResponseTimeHistoryPoint[]) => {
+  if (samples.length < 2) {
+    return RESPONSE_TIME_RANGE_STEPS[0]
+  }
+
+  const firstCheckedAtMs = toTimestampMs(samples[0]?.checkedAt)
+  const lastCheckedAtMs = toTimestampMs(samples[samples.length - 1]?.checkedAt)
+  const spanMs = Number.isFinite(firstCheckedAtMs) && Number.isFinite(lastCheckedAtMs)
+    ? Math.max(0, lastCheckedAtMs - firstCheckedAtMs)
+    : 0
+
+  for (const step of RESPONSE_TIME_RANGE_STEPS) {
+    if (spanMs < step * MINUTE_IN_MS) {
+      return step
+    }
+  }
+
+  return RESPONSE_TIME_RANGE_STEPS[RESPONSE_TIME_RANGE_STEPS.length - 1]
+}
+
+const buildResponseTimeLinePaths = (points: Array<{ x: number; y: number | null }>) => {
+  const paths: string[] = []
+  let commands: string[] = []
+
+  for (const point of points) {
+    if (point.y == null) {
+      if (commands.length > 0) {
+        paths.push(commands.join(' '))
+        commands = []
+      }
+
+      continue
+    }
+
+    commands.push(commands.length === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`)
+  }
+
+  if (commands.length > 0) {
+    paths.push(commands.join(' '))
+  }
+
+  return paths
+}
+
+const buildResponseTimeAreaPaths = (points: Array<{ x: number; y: number | null }>) => {
+  const paths: string[] = []
+  let segment: Array<{ x: number; y: number }> = []
+
+  const pushSegment = () => {
+    if (segment.length === 0) {
+      return
+    }
+
+    const firstPoint = segment[0]
+    const lastPoint = segment[segment.length - 1]
+    const commands = [
+      `M ${firstPoint.x} ${RESPONSE_TIME_CHART_BASELINE_Y}`,
+      `L ${firstPoint.x} ${firstPoint.y}`,
+      ...segment.slice(1).map((point) => `L ${point.x} ${point.y}`),
+      `L ${lastPoint.x} ${RESPONSE_TIME_CHART_BASELINE_Y}`,
+      'Z',
+    ]
+
+    paths.push(commands.join(' '))
+    segment = []
+  }
+
+  for (const point of points) {
+    if (point.y == null) {
+      pushSegment()
+      continue
+    }
+
+    segment.push({ x: point.x, y: point.y })
+  }
+
+  pushSegment()
+
+  return paths
+}
+
+const buildResponseTimeChart = (service: ServiceDetail): ResponseTimeChartModel => {
+  const samples = responseTimeHistoryBySlug.value[service.slug] ?? []
+  const latestCheckedAtMs = toTimestampMs(samples[samples.length - 1]?.checkedAt)
+  const rangeMinutes = resolveResponseTimeRangeMinutes(samples)
+  const rangeDurationMs = rangeMinutes * MINUTE_IN_MS
+  const bucketMinutes = Math.max(1, Math.ceil(rangeMinutes / RESPONSE_TIME_MAX_POINTS))
+  const bucketDurationMs = bucketMinutes * MINUTE_IN_MS
+  const bucketCount = Math.max(1, Math.ceil(rangeDurationMs / bucketDurationMs))
+  const rangeEndMs = Number.isFinite(latestCheckedAtMs) ? latestCheckedAtMs : Date.now()
+  const rangeStartMs = rangeEndMs - rangeDurationMs
+
+  const buckets = Array.from({ length: bucketCount }, (_, index) => {
+    const startMs = rangeStartMs + index * bucketDurationMs
+    const endMs = index === bucketCount - 1 ? rangeEndMs : Math.min(rangeEndMs, startMs + bucketDurationMs)
+
+    return {
+      startMs,
+      endMs,
+      totalResponseTimeMs: 0,
+      pointsCount: 0,
+    }
+  })
+
+  for (const sample of samples) {
+    const checkedAtMs = toTimestampMs(sample.checkedAt)
+
+    if (!Number.isFinite(checkedAtMs) || checkedAtMs < rangeStartMs || checkedAtMs > rangeEndMs) {
+      continue
+    }
+
+    const bucketIndex = Math.min(bucketCount - 1, Math.max(0, Math.floor((checkedAtMs - rangeStartMs) / bucketDurationMs)))
+    const bucket = buckets[bucketIndex]
+
+    if (!bucket || sample.responseTimeMs == null) {
+      continue
+    }
+
+    bucket.totalResponseTimeMs += sample.responseTimeMs
+    bucket.pointsCount += 1
+  }
+
+  const usableWidth = RESPONSE_TIME_CHART_WIDTH - RESPONSE_TIME_CHART_PADDING_X * 2
+  const usableHeight = RESPONSE_TIME_CHART_BASELINE_Y - RESPONSE_TIME_CHART_PADDING_TOP
+  const points = buckets.map((bucket, index) => {
+    const averageResponseTimeMs = bucket.pointsCount > 0 ? bucket.totalResponseTimeMs / bucket.pointsCount : null
+    const x = bucketCount === 1
+      ? RESPONSE_TIME_CHART_WIDTH / 2
+      : RESPONSE_TIME_CHART_PADDING_X + (index * usableWidth) / (bucketCount - 1)
+
+    return {
+      id: `${service.slug}-response-time-${bucket.startMs}`,
+      title: `${formatTimelineRange(bucket.startMs, bucket.endMs)} - ${averageResponseTimeMs == null ? t('services.status.noData') : formatLatency(averageResponseTimeMs)}`,
+      value: averageResponseTimeMs,
+      x,
+      y: null as number | null,
+    }
+  })
+
+  const values = points.flatMap((point) => (point.value == null ? [] : [point.value]))
+  const hasData = values.length > 0
+  const maxValue = hasData ? Math.max(100, Math.max(...values)) * 1.15 : 100
+
+  for (const point of points) {
+    point.y = point.value == null
+      ? null
+      : RESPONSE_TIME_CHART_BASELINE_Y - (point.value / maxValue) * usableHeight
+  }
+
+  return {
+    startLabel: formatTimelinePoint(rangeStartMs),
+    endLabel: formatTimelinePoint(rangeEndMs),
+    linePaths: buildResponseTimeLinePaths(points),
+    areaPaths: buildResponseTimeAreaPaths(points),
+    markers: points.flatMap((point) => {
+      return point.y == null
+        ? []
+        : [{ id: point.id, title: point.title, x: point.x, y: point.y }]
+    }),
+    hasData,
+  }
+}
+
 const formatTimelineIncidentCount = (count: number) => {
   return count === 1
     ? t('dashboard.console.timelineIncident', { count })
@@ -558,6 +941,19 @@ const buildHourlyOverlapBars = (service: ServiceDetail, hours: number): Timeline
 
 const serviceCheckBars = (service: ServiceDetail) => buildHourlyOverlapBars(service, 12)
 const overviewSignalBars = (service: ServiceDetail) => buildMinuteSnapshotBars(service, 30)
+const responseTimeChartsBySlug = computed(() => {
+  const charts: Record<string, ResponseTimeChartModel> = {}
+
+  for (const service of servicesStore.items) {
+    charts[service.slug] = buildResponseTimeChart(service)
+  }
+
+  return charts
+})
+
+const responseTimeChartFor = (slug: string) => {
+  return responseTimeChartsBySlug.value[slug]
+}
 
 const selectedSignalBars = computed(() => {
   return activeService.value ? buildMinuteSnapshotBars(activeService.value, 30) : []
@@ -565,6 +961,10 @@ const selectedSignalBars = computed(() => {
 
 const recentTimelineBars = computed(() => {
   return activeService.value ? buildHourlyOverlapBars(activeService.value, 24) : []
+})
+
+const activeResponseTimeChart = computed(() => {
+  return activeService.value ? responseTimeChartFor(activeService.value.slug) ?? null : null
 })
 
 const toIso = (value: string) => {
@@ -673,6 +1073,7 @@ const bootstrap = async () => {
 
   try {
     await servicesStore.fetchServices()
+    establishResponseTimeBaselines(servicesStore.items)
     await loadTimeline24h()
     markDashboardRefreshed()
     errorMessage.value = ''
@@ -692,6 +1093,7 @@ const refreshLiveData = async () => {
 
   try {
     await servicesStore.fetchServices({ silent: true })
+    collectFreshResponseTimes(servicesStore.items)
     await Promise.all([
       loadTimeline24h(),
       panelMode.value === 'service' && selectedServiceSlug.value
@@ -771,6 +1173,7 @@ const createService = async () => {
 
   try {
     const service = await servicesStore.createService(toPayload())
+    establishResponseTimeBaselines(servicesStore.items)
     await loadTimeline24h()
     statusMessage.value = t('dashboard.console.messages.created')
     errorMessage.value = ''
@@ -787,10 +1190,12 @@ const saveService = async () => {
     return
   }
 
+  const previousSlug = selectedServiceSlug.value
   saving.value = true
 
   try {
     const service = await servicesStore.updateService(selectedServiceSlug.value, toPayload())
+    moveResponseTimeHistory(previousSlug, service.slug)
     resetForm(service)
     await Promise.all([loadServiceDetail(service.slug, { syncForm: false }), loadTimeline24h()])
     statusMessage.value = t('dashboard.console.messages.updated')
@@ -827,7 +1232,10 @@ const removeService = async () => {
   deleting.value = true
 
   try {
-    await servicesStore.deleteService(selectedServiceSlug.value)
+    const slugToDelete = selectedServiceSlug.value
+    await servicesStore.deleteService(slugToDelete)
+    dropResponseTimeHistory(slugToDelete)
+    establishResponseTimeBaselines(servicesStore.items)
     selectedUptimeSummary.value = null
     manualTest.value = null
     await loadTimeline24h()
@@ -946,6 +1354,51 @@ watch(
 )
 
 watch(
+  () => orderedServices.value.map((service) => `${service.slug}:${service.runtime.lastCheckAt ?? ''}:${service.runtime.lastResponseTimeMs ?? ''}:${service.runtime.lastFailureMessage ?? ''}`).join('|'),
+  () => {
+    if (!responseTimeChartsEnabled.value) {
+      void syncCollapsedOverviewCardHeights()
+    }
+  },
+)
+
+watch(responseTimeChartsEnabled, (enabled) => {
+  if (!enabled) {
+    void syncCollapsedOverviewCardHeights()
+  }
+})
+
+watch(statusMessage, (message) => {
+  if (statusMessageTimer) {
+    clearTimeout(statusMessageTimer)
+    statusMessageTimer = undefined
+  }
+
+  if (!message) {
+    return
+  }
+
+  statusMessageTimer = setTimeout(() => {
+    statusMessage.value = ''
+  }, TOAST_DURATION_MS)
+})
+
+watch(errorMessage, (message) => {
+  if (errorMessageTimer) {
+    clearTimeout(errorMessageTimer)
+    errorMessageTimer = undefined
+  }
+
+  if (!message) {
+    return
+  }
+
+  errorMessageTimer = setTimeout(() => {
+    errorMessage.value = ''
+  }, TOAST_DURATION_MS)
+})
+
+watch(
   () => route.fullPath,
   () => {
     void applyRouteIntent()
@@ -968,6 +1421,14 @@ onMounted(async () => {
 onUnmounted(() => {
   if (liveRefreshTimer) {
     clearInterval(liveRefreshTimer)
+  }
+
+  if (statusMessageTimer) {
+    clearTimeout(statusMessageTimer)
+  }
+
+  if (errorMessageTimer) {
+    clearTimeout(errorMessageTimer)
   }
 })
 </script>
@@ -995,6 +1456,14 @@ onUnmounted(() => {
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             <span>{{ $t('nav.incidents') }}</span>
           </button>
+
+          <label class="header-switch" :class="{ 'is-active': responseTimeChartsEnabled }">
+            <input :checked="responseTimeChartsEnabled" type="checkbox" @change="toggleResponseTimeCharts" />
+            <span class="header-switch__control" aria-hidden="true">
+              <span class="header-switch__thumb"></span>
+            </span>
+            <span class="header-switch__label">{{ $t('dashboard.console.responseTimeCharts') }}</span>
+          </label>
 
           <button class="icon-btn" type="button" :title="$t('dashboard.console.toggleTheme')" @click="toggleTheme">
             <svg v-if="theme === 'light'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
@@ -1070,8 +1539,10 @@ onUnmounted(() => {
                 <article
                   v-for="service in orderedServices"
                   :key="service.id"
+                  :data-overview-service-card="service.slug"
                   class="overview-service-card shell-card"
-                  :class="[`is-${serviceState(service)}`]"
+                  :class="[`is-${serviceState(service)}`, { 'overview-service-card--expanded': responseTimeChartsEnabled }]"
+                  :style="overviewCardStyle(service.slug)"
                   role="button"
                   tabindex="0"
                   @click="selectService(service.slug)"
@@ -1125,6 +1596,55 @@ onUnmounted(() => {
                     <span>{{ $t('dashboard.console.lastFailureMessage') }}</span>
                     <strong>{{ service.runtime.lastFailureMessage }}</strong>
                   </p>
+
+                  <section
+                    v-if="responseTimeChartsEnabled"
+                    class="response-time-chart"
+                    :aria-label="$t('dashboard.console.responseTimeChartLabel', { service: service.name })"
+                  >
+                    <div class="response-time-chart__plot">
+                      <svg class="response-time-chart__svg" :viewBox="responseTimeChartViewBox" preserveAspectRatio="none" role="img">
+                        <title>{{ $t('dashboard.console.responseTimeChartLabel', { service: service.name }) }}</title>
+                        <line
+                          v-for="gridY in responseTimeChartGridYs"
+                          :key="`${service.slug}-grid-${gridY}`"
+                          class="response-time-chart__grid"
+                          :x1="0"
+                          :x2="100"
+                          :y1="gridY"
+                          :y2="gridY"
+                        />
+                        <line class="response-time-chart__baseline" :x1="0" :x2="100" :y1="56" :y2="56" />
+                        <path
+                          v-for="(path, index) in responseTimeChartFor(service.slug)?.areaPaths ?? []"
+                          :key="`${service.slug}-area-${index}`"
+                          class="response-time-chart__area"
+                          :d="path"
+                        />
+                        <path
+                          v-for="(path, index) in responseTimeChartFor(service.slug)?.linePaths ?? []"
+                          :key="`${service.slug}-line-${index}`"
+                          class="response-time-chart__line"
+                          :d="path"
+                        />
+                        <circle
+                          v-for="marker in responseTimeChartFor(service.slug)?.markers ?? []"
+                          :key="marker.id"
+                          class="response-time-chart__dot"
+                          :cx="marker.x"
+                          :cy="marker.y"
+                          r="1.5"
+                        >
+                          <title>{{ marker.title }}</title>
+                        </circle>
+                      </svg>
+                    </div>
+
+                    <div class="response-time-chart__axis">
+                      <span>{{ responseTimeChartFor(service.slug)?.startLabel }}</span>
+                      <span>{{ responseTimeChartFor(service.slug)?.endLabel }}</span>
+                    </div>
+                  </section>
                 </article>
               </section>
 
@@ -1307,6 +1827,7 @@ onUnmounted(() => {
                   <span>{{ $t('dashboard.console.lastFailureMessage') }}</span>
                   <strong>{{ activeService.runtime.lastFailureMessage }}</strong>
                 </p>
+
               </section>
 
               <section class="service-health-grid" :aria-label="$t('dashboard.console.serviceHealthLabel')">
@@ -1350,6 +1871,56 @@ onUnmounted(() => {
                     <strong>{{ stat.percent }}</strong>
                     <small>{{ stat.detail }}</small>
                   </article>
+                </div>
+              </section>
+
+              <section
+                class="detail-response-time-card shell-card"
+                :aria-label="$t('dashboard.console.responseTimeChartLabel', { service: activeService.name })"
+              >
+                <div class="response-time-chart response-time-chart--detail-card">
+                  <div class="response-time-chart__plot response-time-chart__plot--detail-card">
+                    <svg class="response-time-chart__svg" :viewBox="responseTimeChartViewBox" preserveAspectRatio="none" role="img">
+                      <title>{{ $t('dashboard.console.responseTimeChartLabel', { service: activeService.name }) }}</title>
+                      <line
+                        v-for="gridY in responseTimeChartGridYs"
+                        :key="`${activeService.slug}-detail-grid-${gridY}`"
+                        class="response-time-chart__grid"
+                        :x1="0"
+                        :x2="100"
+                        :y1="gridY"
+                        :y2="gridY"
+                      />
+                      <line class="response-time-chart__baseline" :x1="0" :x2="100" :y1="56" :y2="56" />
+                      <path
+                        v-for="(path, index) in activeResponseTimeChart?.areaPaths ?? []"
+                        :key="`${activeService.slug}-detail-area-${index}`"
+                        class="response-time-chart__area"
+                        :d="path"
+                      />
+                      <path
+                        v-for="(path, index) in activeResponseTimeChart?.linePaths ?? []"
+                        :key="`${activeService.slug}-detail-line-${index}`"
+                        class="response-time-chart__line"
+                        :d="path"
+                      />
+                      <circle
+                        v-for="marker in activeResponseTimeChart?.markers ?? []"
+                        :key="marker.id"
+                        class="response-time-chart__dot"
+                        :cx="marker.x"
+                        :cy="marker.y"
+                        r="1.7"
+                      >
+                        <title>{{ marker.title }}</title>
+                      </circle>
+                    </svg>
+                  </div>
+
+                  <div class="response-time-chart__axis">
+                    <span>{{ activeResponseTimeChart?.startLabel }}</span>
+                    <span>{{ activeResponseTimeChart?.endLabel }}</span>
+                  </div>
                 </div>
               </section>
 
@@ -1469,7 +2040,7 @@ onUnmounted(() => {
   min-width: 100%;
   max-width: 1320px;
   margin: 0 auto;
-  padding: 8px 24px;
+  padding: 6px 24px;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1505,15 +2076,85 @@ onUnmounted(() => {
   flex-wrap: nowrap;
 }
 
+.header-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.header-switch:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+}
+
+.header-switch.is-active {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 88%, var(--surface)), var(--surface));
+}
+
+.header-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.header-switch__control {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 78%, var(--surface));
+  transition: background-color 180ms ease;
+}
+
+.header-switch.is-active .header-switch__control {
+  background: color-mix(in srgb, var(--accent) 60%, var(--surface));
+}
+
+.header-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+  transition: transform 180ms ease;
+}
+
+.header-switch.is-active .header-switch__thumb {
+  transform: translateX(14px);
+}
+
+.header-switch__label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .dashboard-header__refresh {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  min-width: 0;
+  min-width: 180px;
   padding: 0;
   min-height: 0;
   text-align: center;
   align-self: center;
+  justify-content: center;
+  flex: 0 0 180px;
 }
 
 .dashboard-header__refresh::before,
@@ -1531,6 +2172,7 @@ onUnmounted(() => {
   line-height: 1;
   color: var(--text);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .header-action,
@@ -1592,7 +2234,7 @@ onUnmounted(() => {
   width: 100%;
   max-width: 1320px;
   margin: 0 auto;
-  padding: 10px 24px 0px;
+  padding: 8px 24px 2px;
 }
 
 .dashboard-body--detail {
@@ -1659,11 +2301,19 @@ onUnmounted(() => {
 }
 
 .overview-service-card {
+  --overview-card-height: 196px;
   padding: 14px 16px;
   display: grid;
   gap: 12px;
+  min-height: var(--overview-card-height);
+  grid-template-rows: auto auto auto auto 1fr;
+  overflow: hidden;
   cursor: pointer;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.overview-service-card--expanded {
+  min-height: calc(var(--overview-card-height) * 2);
 }
 
 .overview-service-card:hover {
@@ -1874,6 +2524,90 @@ onUnmounted(() => {
   padding: 28px;
   display: grid;
   gap: 22px;
+}
+
+.response-time-chart {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.overview-service-card > .response-time-chart {
+  grid-row: 5;
+  align-self: stretch;
+}
+
+.response-time-chart--detail-card {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.response-time-chart__plot {
+  position: relative;
+  min-height: 100px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 32%, transparent), transparent 55%),
+    color-mix(in srgb, var(--surface-muted) 82%, var(--surface));
+  overflow: hidden;
+}
+
+.response-time-chart__plot--detail-card {
+  min-height: 240px;
+  max-height: 240px;
+}
+
+.response-time-chart__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.response-time-chart__grid,
+.response-time-chart__baseline {
+  stroke: color-mix(in srgb, var(--border) 76%, transparent);
+  stroke-width: 0.8;
+}
+
+.response-time-chart__baseline {
+  stroke: color-mix(in srgb, var(--text-faint) 34%, transparent);
+}
+
+.response-time-chart__area {
+  fill: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.response-time-chart__line {
+  fill: none;
+  stroke: var(--accent-strong);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.response-time-chart__dot {
+  fill: var(--accent-strong);
+  stroke: var(--surface);
+  stroke-width: 0.8;
+}
+
+.response-time-chart__axis {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.detail-response-time-card {
+  padding: 18px 24px 16px;
 }
 
 .detail-sidebar {
@@ -2467,8 +3201,20 @@ onUnmounted(() => {
   .dashboard-header__actions {
     width: 100%;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px 40px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 6px;
+  }
+
+  .header-switch {
+    grid-column: 1 / -1;
+    justify-content: center;
+    padding: 0 10px;
+  }
+
+  .header-switch__label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .header-action {
@@ -2484,9 +3230,9 @@ onUnmounted(() => {
   }
 
   .icon-btn {
-    width: 36px;
+    width: 100%;
     min-height: 36px;
-    flex: 0 0 36px;
+    flex: 0 0 auto;
   }
 
   .page-header,
@@ -2499,8 +3245,14 @@ onUnmounted(() => {
   }
 
   .overview-service-card {
+    --overview-card-height: 204px;
     padding: 16px 18px;
     border-radius: 20px;
+    min-height: var(--overview-card-height);
+  }
+
+  .overview-service-card--expanded {
+    min-height: calc(var(--overview-card-height) * 2);
   }
 
   .overview-service-card__head,
