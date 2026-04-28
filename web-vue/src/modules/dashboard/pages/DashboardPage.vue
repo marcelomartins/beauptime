@@ -3339,7 +3339,6 @@ onUnmounted(() => {
     grid-template-rows: auto auto auto auto minmax(0, 1fr);
   }
 
-  .overview-service-card__head,
   .service-focus__head,
   .form-card__head,
   .incident-card,
