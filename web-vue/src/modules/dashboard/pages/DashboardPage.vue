@@ -3348,14 +3348,8 @@ onUnmounted(() => {
     align-items: stretch;
   }
 
-  .service-metrics-row,
   .incident-meta {
     grid-template-columns: 1fr;
-    justify-items: start;
-    text-align: left;
-  }
-
-  .check-metric--right {
     justify-items: start;
     text-align: left;
   }
