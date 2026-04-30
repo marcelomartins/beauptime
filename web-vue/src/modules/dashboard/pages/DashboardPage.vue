@@ -1626,7 +1626,13 @@ onUnmounted(() => {
                   :key="service.id"
                   :data-overview-service-card="service.slug"
                   class="overview-service-card shell-card"
-                  :class="[`is-${serviceState(service)}`, { 'overview-service-card--expanded': responseTimeChartsEnabled }]"
+                  :class="[
+                    `is-${serviceState(service)}`,
+                    {
+                      'overview-service-card--expanded': responseTimeChartsEnabled,
+                      'overview-service-card--expanded-no-failure': responseTimeChartsEnabled && !service.runtime.lastFailureMessage,
+                    },
+                  ]"
                   :style="overviewCardStyle(service.slug)"
                   role="button"
                   tabindex="0"
@@ -2411,6 +2417,10 @@ onUnmounted(() => {
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
+.overview-service-card--expanded-no-failure {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
 .overview-service-card:hover {
   transform: translateY(-2px);
   border-color: var(--border-strong);
@@ -2633,6 +2643,10 @@ onUnmounted(() => {
 .overview-service-card > .response-time-chart {
   grid-row: 5;
   align-self: stretch;
+}
+
+.overview-service-card--expanded-no-failure > .response-time-chart {
+  grid-row: 4;
 }
 
 .response-time-chart--detail-card {
@@ -3347,6 +3361,10 @@ onUnmounted(() => {
   .overview-service-card--expanded {
     min-height: calc(var(--overview-card-height) * 2);
     grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  }
+
+  .overview-service-card--expanded-no-failure {
+    grid-template-rows: auto auto auto minmax(0, 1fr);
   }
 
   .service-focus__head,
