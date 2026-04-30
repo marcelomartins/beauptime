@@ -550,7 +550,17 @@ const findUptimeWindow = (days: number): UptimeWindow | undefined => {
 }
 
 const buildUptimeStat = (label: string, days: number): UptimeStat => {
-  if (!activeService.value?.runtime.lastCheckAt) {
+  const service = activeService.value
+
+  if (service && Date.now() - getMonitoringStartedAtMs(service) < days * 24 * HOUR_IN_MS) {
+    return {
+      label,
+      percent: '-',
+      detail: '',
+    }
+  }
+
+  if (!service?.runtime.lastCheckAt) {
     return {
       label,
       percent: '--',
@@ -1944,7 +1954,7 @@ onUnmounted(() => {
                   <article v-for="stat in uptimeWindowStats" :key="stat.label" class="uptime-stat-item">
                     <span>{{ stat.label }}</span>
                     <strong>{{ stat.percent }}</strong>
-                    <small>{{ stat.detail }}</small>
+                    <small v-if="stat.detail">{{ stat.detail }}</small>
                   </article>
                 </div>
               </section>
@@ -2942,7 +2952,7 @@ onUnmounted(() => {
 
 .uptime-stat-item {
   min-height: 128px;
-  padding: 18px 20px;
+  padding: 18px 20px 0px 20px;
   border-radius: 18px;
   background: var(--surface-muted);
   display: grid;
